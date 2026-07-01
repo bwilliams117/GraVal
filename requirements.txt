@@ -1,0 +1,10 @@
+cartopy
+matplotlib
+numpy
+xarray
+dask
+earthaccess
+python-dotenv
+customtkinter
+astral
+requests

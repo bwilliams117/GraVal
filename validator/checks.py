@@ -319,36 +319,49 @@ def check_file_size_sanity(granule) -> CheckResult:
     if not info_list:
         return CheckResult(name, Status.WARN, "No ArchiveAndDistributionInformation entries found")
 
+    def _human_size(size_bytes: float) -> str:
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if size_bytes < 1024:
+                return f"{size_bytes:.2f} {unit}" if unit != "B" else f"{int(size_bytes)} B"
+            size_bytes /= 1024
+        return f"{size_bytes:.2f} PB"
+
     zero_files = []
     tiny_files = []
+    file_sizes = {}
+
     for entry in info_list:
         fname = entry.get("Name", "unknown")
         size_bytes = entry.get("SizeInBytes")
         size_mb = entry.get("Size")
-
         size_unit = entry.get("SizeUnit", "").upper()
 
         if size_bytes is not None:
+            file_sizes[fname] = _human_size(size_bytes)
             if size_bytes == 0:
                 zero_files.append(fname)
             elif size_bytes < 1024:
-                tiny_files.append(f"{fname} ({size_bytes} B)")
+                tiny_files.append(fname)
         elif size_mb is not None:
-            # Normalise to bytes for comparison based on declared unit
             unit_to_bytes = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
-            multiplier = unit_to_bytes.get(size_unit, 1024**2)  # default assume MB
+            multiplier = unit_to_bytes.get(size_unit, 1024**2)
             size_in_bytes = size_mb * multiplier
+            file_sizes[fname] = _human_size(size_in_bytes)
             if size_in_bytes == 0:
                 zero_files.append(fname)
             elif size_in_bytes < 1024:
-                tiny_files.append(f"{fname} ({size_mb} {size_unit or 'MB'})")
+                tiny_files.append(fname)
+        else:
+            file_sizes[fname] = "size unknown"
+
+    details = {"files": [f"{n}: {s}" for n, s in file_sizes.items()]}
 
     if zero_files:
-        return CheckResult(name, Status.FAIL, f"Zero-size files: {', '.join(zero_files)}")
+        return CheckResult(name, Status.FAIL, f"Zero-size file(s): {', '.join(zero_files)}", details)
     if tiny_files:
-        return CheckResult(name, Status.WARN, f"Suspiciously small files (<1KB): {', '.join(tiny_files)}")
+        return CheckResult(name, Status.WARN, f"Suspiciously small file(s) (<1 KB): {', '.join(tiny_files)}", details)
 
-    return CheckResult(name, Status.PASS, f"File size(s) look reasonable ({len(info_list)} file(s))")
+    return CheckResult(name, Status.PASS, f"{len(info_list)} file(s) — sizes look reasonable", details)
 
 
 def check_production_date_sanity(granule) -> CheckResult:

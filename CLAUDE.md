@@ -29,7 +29,7 @@ gui/
   config_screen.py   — sample size slider, date range, check toggles
   results_screen.py  — runs ValidationRunner in background; polling loop; detail pane; CSV export
 validator/
-  checks.py          — 8 modular check functions returning CheckResult(check_name, status, message, details)
+  checks.py          — 9 modular check functions returning CheckResult(check_name, status, message, details)
   runner.py          — ValidationRunner (background thread + queue.Queue); GranuleReport; ValidationRun
   report.py          — export_csv(), export_summary_text(), default_report_path()
 ```
@@ -39,7 +39,7 @@ validator/
 All earthaccess calls run in daemon background threads. The `results_screen.py` polls `runner.result_queue` every 100 ms via `self.after(100, self._poll)`. Worker threads put `("progress"|"done"|"error"|"cancelled", payload)` tuples into the queue — they never call widget methods directly.
 
 ## Validation Checks
-The 8 checks live in `validator/checks.py`. Each returns a `CheckResult(status=Status.PASS|WARN|FAIL, ...)`.
+The 9 checks live in `validator/checks.py`. Each returns a `CheckResult(status=Status.PASS|WARN|FAIL, ...)`.
 
 | ID           | What it verifies |
 |--------------|------------------|
@@ -47,8 +47,9 @@ The 8 checks live in `validator/checks.py`. Each returns a `CheckResult(status=S
 | `temporal`   | BeginningDateTime ≤ EndingDateTime, not in future |
 | `spatial`    | Coordinates in valid ranges; polygon closure |
 | `daynight`   | DayNightFlag matches computed sun position (astral) |
-| `file_avail` | At least one download URL exists |
+| `url_health` | Download URLs exist and the first one responds with HTTP 2xx (live HEAD/GET probe via authenticated session) |
 | `file_size`  | No zero-byte or suspiciously tiny files |
+| `prod_date`  | ProductionDateTime is present, after BeginningDateTime, not in the future, and not the Unix epoch sentinel |
 | `collection` | CollectionReference.ShortName matches selected collection |
 | `duplicates` | No repeated concept-ids in the sample |
 

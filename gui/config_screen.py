@@ -101,8 +101,9 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             "temporal":   "Temporal Validity — date range is logical",
             "spatial":    "Spatial Validity — coordinate ranges are valid",
             "daynight":   "Day/Night Consistency — flag vs. sun position",
-            "file_avail": "File Availability — download URLs exist",
+            "url_health": "URL Health — download URLs exist and are reachable",
             "file_size":  "File Size Sanity — no zero-byte or suspiciously tiny files",
+            "prod_date":  "Production Date Sanity — produced after acquisition",
             "collection": "Collection Reference — granule belongs to selected collection",
             "duplicates": "Duplicate Detection — no repeated granule IDs in sample",
         }

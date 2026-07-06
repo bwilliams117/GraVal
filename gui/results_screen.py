@@ -247,13 +247,58 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         ])
 
         textbox.insert("end", "\n")
+
+        _uid = [0]
+
+        def _make_toggle(tb, tag_closed, tag_open, tag_items):
+            is_open = [False]
+            def _toggle(_e):
+                tb.configure(state="normal")
+                if is_open[0]:
+                    tb.tag_configure(tag_items,  elide=True)
+                    tb.tag_configure(tag_closed, elide=False)
+                    tb.tag_configure(tag_open,   elide=True)
+                    is_open[0] = False
+                else:
+                    tb.tag_configure(tag_items,  elide=False)
+                    tb.tag_configure(tag_closed, elide=True)
+                    tb.tag_configure(tag_open,   elide=False)
+                    is_open[0] = True
+                tb.configure(state="disabled")
+            return _toggle
+
         for check in report.checks:
             symbol = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}.get(check.status.value, "?")
             textbox.insert("end", f"[{check.status.value}] {symbol} {check.check_name}\n")
             textbox.insert("end", f"       {check.message}\n")
             if check.details:
                 for k, v in check.details.items():
-                    textbox.insert("end", f"       {k}: {v}\n")
+                    if isinstance(v, list):
+                        _uid[0] += 1
+                        uid = _uid[0]
+                        tc = f"tc_{uid}"  # closed arrow tag
+                        to = f"to_{uid}"  # open arrow tag
+                        th = f"th_{uid}"  # header label tag
+                        ti = f"ti_{uid}"  # items tag
+
+                        textbox.tag_configure(tc, foreground="#4ea6dc")
+                        textbox.tag_configure(to, foreground="#4ea6dc", elide=True)
+                        textbox.tag_configure(th, foreground="#4ea6dc")
+                        textbox.tag_configure(ti, elide=True)
+
+                        textbox.insert("end", "       ")
+                        textbox.insert("end", "▶", tc)
+                        textbox.insert("end", "▼", to)
+                        textbox.insert("end", f" {k}: ({len(v)})\n", th)
+                        textbox.insert("end", "".join(f"           {item}\n" for item in v), ti)
+
+                        toggle_fn = _make_toggle(textbox, tc, to, ti)
+                        for t in (tc, to, th):
+                            textbox.tag_bind(t, "<Button-1>", toggle_fn)
+                            textbox.tag_bind(t, "<Enter>", lambda _e: textbox.config(cursor="hand2"))
+                            textbox.tag_bind(t, "<Leave>", lambda _e: textbox.config(cursor=""))
+                    else:
+                        textbox.insert("end", f"       {k}: {v}\n")
             textbox.insert("end", "\n")
 
         if _HAS_CTK:

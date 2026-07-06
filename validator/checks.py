@@ -88,25 +88,32 @@ def check_temporal_validity(granule) -> CheckResult:
     if begin_dt.tzinfo is None:
         begin_dt = begin_dt.replace(tzinfo=timezone.utc)
 
+    details: dict = {"beginning_datetime": begin_str}
+
     if begin_dt > now:
-        return CheckResult(name, Status.FAIL, f"BeginningDateTime is in the future: {begin_str}")
+        return CheckResult(name, Status.FAIL, f"BeginningDateTime is in the future: {begin_str}", details)
 
     if end_str:
+        details["ending_datetime"] = end_str
         try:
             end_dt = dateutil_parser.isoparse(end_str)
         except Exception:
-            return CheckResult(name, Status.FAIL, f"EndingDateTime not valid ISO8601: {end_str!r}")
+            return CheckResult(name, Status.FAIL, f"EndingDateTime not valid ISO8601: {end_str!r}", details)
 
         if end_dt.tzinfo is None:
             end_dt = end_dt.replace(tzinfo=timezone.utc)
+
+        duration_days = (end_dt - begin_dt).total_seconds() / 86400
+        details["duration_days"] = round(duration_days, 4)
 
         if begin_dt > end_dt:
             return CheckResult(
                 name, Status.FAIL,
                 f"BeginningDateTime ({begin_str}) is after EndingDateTime ({end_str})",
+                details,
             )
 
-    return CheckResult(name, Status.PASS, "Temporal extent is valid")
+    return CheckResult(name, Status.PASS, "Temporal extent is valid", details)
 
 
 def check_spatial_validity(granule) -> CheckResult:
@@ -120,13 +127,17 @@ def check_spatial_validity(granule) -> CheckResult:
         return CheckResult(name, Status.WARN, "No Geometry found in SpatialExtent")
 
     errors = []
+    details: dict = {"geometry_type": ", ".join(k for k in ("BoundingRectangles", "GPolygons", "Points") if k in geom)}
 
     if "BoundingRectangles" in geom:
-        for i, r in enumerate(geom["BoundingRectangles"]):
+        rects = geom["BoundingRectangles"]
+        details["bounding_rectangles"] = len(rects)
+        for i, r in enumerate(rects):
             west = r.get("WestBoundingCoordinate", 0)
             east = r.get("EastBoundingCoordinate", 0)
             north = r.get("NorthBoundingCoordinate", 0)
             south = r.get("SouthBoundingCoordinate", 0)
+            details[f"rect_{i}"] = f"W:{west} E:{east} S:{south} N:{north}"
             if not (-180 <= west <= 180 and -180 <= east <= 180):
                 errors.append(f"BoundingRect[{i}]: longitude out of range")
             if not (-90 <= south <= 90 and -90 <= north <= 90):
@@ -135,8 +146,12 @@ def check_spatial_validity(granule) -> CheckResult:
                 errors.append(f"BoundingRect[{i}]: south > north")
 
     if "GPolygons" in geom:
-        for i, poly in enumerate(geom["GPolygons"]):
+        polys = geom["GPolygons"]
+        details["polygons"] = len(polys)
+        total_points = 0
+        for i, poly in enumerate(polys):
             pts = poly.get("Boundary", {}).get("Points", [])
+            total_points += len(pts)
             for j, p in enumerate(pts):
                 lat, lon = p.get("Latitude", 0), p.get("Longitude", 0)
                 if not (-90 <= lat <= 90):
@@ -145,11 +160,13 @@ def check_spatial_validity(granule) -> CheckResult:
                     errors.append(f"GPolygon[{i}] point[{j}]: longitude {lon} out of range")
             if pts and (pts[0] != pts[-1]):
                 errors.append(f"GPolygon[{i}]: polygon is not closed (first != last point)")
+        details["polygon_points"] = total_points
 
     if errors:
-        return CheckResult(name, Status.FAIL, f"{len(errors)} spatial error(s) found", {"errors": errors})
+        details["errors"] = errors
+        return CheckResult(name, Status.FAIL, f"{len(errors)} spatial error(s) found", details)
 
-    return CheckResult(name, Status.PASS, "Spatial extent coordinates are valid")
+    return CheckResult(name, Status.PASS, "Spatial extent coordinates are valid", details)
 
 
 def check_daynight_consistency(granule) -> CheckResult:
@@ -214,8 +231,8 @@ def check_daynight_consistency(granule) -> CheckResult:
         return CheckResult(name, Status.WARN, f"Sun position check inconclusive: {e}")
 
 
-def check_file_availability(granule) -> CheckResult:
-    name = "File Availability"
+def check_url_health(granule) -> CheckResult:
+    name = "URL Health"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
@@ -224,14 +241,71 @@ def check_file_availability(granule) -> CheckResult:
             links = []
 
     if not links:
-        # Fall back to raw RelatedUrls
         related = granule.get("umm", {}).get("RelatedUrls", [])
         links = [u["URL"] for u in related if u.get("Type") in ("GET DATA", "GET DATA VIA DIRECT ACCESS")]
 
     if not links:
         return CheckResult(name, Status.FAIL, "No download URLs found")
 
-    return CheckResult(name, Status.PASS, f"{len(links)} download URL(s) present", {"urls": links[:3]})
+    url = links[0]
+
+    # S3 direct-access URLs cannot be probed via HTTP — presence alone is sufficient
+    if url.startswith("s3://"):
+        return CheckResult(name, Status.PASS, f"{len(links)} URL(s) found (S3 direct access)", {"urls": links})
+
+    import earthaccess
+    import requests
+
+    session = earthaccess.get_requests_https_session()
+
+    def _probe(verify_ssl: bool) -> int:
+        resp = session.head(url, timeout=8, allow_redirects=True, verify=verify_ssl)
+        if resp.status_code == 405:
+            resp = session.get(url, timeout=8, stream=True, verify=verify_ssl)
+            resp.close()
+        return resp.status_code
+
+    ssl_warning = None
+    try:
+        code = _probe(verify_ssl=True)
+    except requests.exceptions.SSLError:
+        # NASA Earthdata Cloud CDN sometimes presents a self-signed intermediate cert
+        # that Python rejects but browsers accept. Retry without verification to
+        # distinguish a real SSL/cert problem from a reachable file.
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                code = _probe(verify_ssl=False)
+            ssl_warning = "SSL certificate could not be verified (self-signed CDN cert)"
+        except Exception as exc:
+            exc_summary = str(exc).splitlines()[0][:120]
+            return CheckResult(
+                name, Status.WARN,
+                f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
+                {"probed_url": url, "urls": links},
+            )
+    except Exception as exc:
+        exc_summary = str(exc).splitlines()[0][:120]
+        return CheckResult(
+            name, Status.WARN,
+            f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
+            {"probed_url": url, "urls": links},
+        )
+
+    details = {"probed_url": url, "http_status": code, "urls": links}
+    if ssl_warning:
+        details["ssl_note"] = ssl_warning
+
+    if 200 <= code < 300:
+        # SSL cert issues on NASA's CDN are an infrastructure quirk, not a data problem —
+        # the file is reachable, so this is still a PASS.
+        return CheckResult(name, Status.PASS, f"{len(links)} URL(s) found; first URL reachable (HTTP {code})", details)
+    elif code in (401, 403):
+        return CheckResult(name, Status.WARN, f"URL access restricted (HTTP {code}) — may require different credentials", details)
+    elif code == 404:
+        return CheckResult(name, Status.FAIL, "URL not found (HTTP 404)", details)
+    else:
+        return CheckResult(name, Status.WARN, f"URL returned unexpected HTTP {code}", details)
 
 
 def check_file_size_sanity(granule) -> CheckResult:
@@ -275,6 +349,56 @@ def check_file_size_sanity(granule) -> CheckResult:
         return CheckResult(name, Status.WARN, f"Suspiciously small files (<1KB): {', '.join(tiny_files)}")
 
     return CheckResult(name, Status.PASS, f"File size(s) look reasonable ({len(info_list)} file(s))")
+
+
+def check_production_date_sanity(granule) -> CheckResult:
+    name = "Production Date Sanity"
+    umm = granule.get("umm", {})
+
+    prod_str = umm.get("DataGranule", {}).get("ProductionDateTime")
+    if not prod_str:
+        return CheckResult(name, Status.WARN, "ProductionDateTime is absent — cannot verify")
+
+    try:
+        prod_dt = dateutil_parser.isoparse(prod_str)
+    except Exception:
+        return CheckResult(name, Status.FAIL, f"ProductionDateTime not valid ISO8601: {prod_str!r}")
+
+    if prod_dt.tzinfo is None:
+        prod_dt = prod_dt.replace(tzinfo=timezone.utc)
+
+    # Sentinel: Unix epoch zero is a known pipeline placeholder
+    from datetime import timezone as _tz
+    epoch = datetime(1970, 1, 1, tzinfo=_tz.utc)
+    if prod_dt == epoch:
+        return CheckResult(name, Status.FAIL, "ProductionDateTime is Unix epoch (1970-01-01) — likely a pipeline default placeholder")
+
+    try:
+        begin_str = umm["TemporalExtent"]["RangeDateTime"]["BeginningDateTime"]
+        begin_dt = dateutil_parser.isoparse(begin_str)
+        if begin_dt.tzinfo is None:
+            begin_dt = begin_dt.replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, Exception):
+        return CheckResult(name, Status.WARN, "BeginningDateTime unavailable — cannot compare against ProductionDateTime",
+                           {"production_datetime": prod_str})
+
+    details = {
+        "production_datetime": prod_str,
+        "beginning_datetime": begin_str,
+    }
+
+    if prod_dt < begin_dt:
+        return CheckResult(
+            name, Status.FAIL,
+            f"ProductionDateTime ({prod_str}) is before BeginningDateTime ({begin_str}) — data cannot be produced before it was collected",
+            details,
+        )
+
+    now = datetime.now(tz=timezone.utc)
+    if prod_dt > now:
+        return CheckResult(name, Status.FAIL, f"ProductionDateTime is in the future: {prod_str}", details)
+
+    return CheckResult(name, Status.PASS, "ProductionDateTime is after acquisition and not in the future", details)
 
 
 def check_collection_reference(granule, expected_short_name: str) -> CheckResult:

@@ -14,24 +14,26 @@ from .checks import (
     check_collection_reference,
     check_daynight_consistency,
     check_duplicate_detection,
-    check_file_availability,
     check_file_size_sanity,
+    check_production_date_sanity,
     check_schema_completeness,
     check_spatial_validity,
     check_temporal_validity,
+    check_url_health,
 )
 
 # Registry: check_id → (label, function)
 # Per-granule checks take (granule,); collection_reference takes (granule, short_name)
 CHECKS = {
-    "schema":      ("Schema Completeness",        check_schema_completeness),
-    "temporal":    ("Temporal Validity",           check_temporal_validity),
-    "spatial":     ("Spatial Validity",            check_spatial_validity),
-    "daynight":    ("Day/Night Consistency",       check_daynight_consistency),
-    "file_avail":  ("File Availability",           check_file_availability),
-    "file_size":   ("File Size Sanity",            check_file_size_sanity),
-    "collection":  ("Collection Reference",        check_collection_reference),
-    "duplicates":  ("Duplicate Detection",         None),  # handled separately (whole-sample check)
+    "schema":       ("Schema Completeness",        check_schema_completeness),
+    "temporal":     ("Temporal Validity",           check_temporal_validity),
+    "spatial":      ("Spatial Validity",            check_spatial_validity),
+    "daynight":     ("Day/Night Consistency",       check_daynight_consistency),
+    "url_health":   ("URL Health",                  check_url_health),
+    "file_size":    ("File Size Sanity",            check_file_size_sanity),
+    "prod_date":    ("Production Date Sanity",      check_production_date_sanity),
+    "collection":   ("Collection Reference",        check_collection_reference),
+    "duplicates":   ("Duplicate Detection",         None),  # handled separately (whole-sample check)
 }
 
 ALL_CHECK_IDS = list(CHECKS.keys())

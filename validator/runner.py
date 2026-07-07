@@ -43,6 +43,7 @@ ALL_CHECK_IDS = list(CHECKS.keys())
 class GranuleReport:
     granule_ur: str
     concept_id: str
+    browse_url: str | None = None
     checks: list[CheckResult] = field(default_factory=list)
 
     @property
@@ -198,7 +199,13 @@ class ValidationRunner:
                 concept_id = granule.get("meta", {}).get("concept-id", "unknown")
                 self._put("progress", (idx, total, f"Checking {granule_ur}"))
 
-                report = GranuleReport(granule_ur=granule_ur, concept_id=concept_id)
+                related = granule.get("umm", {}).get("RelatedUrls", [])
+                browse_url = next(
+                    (u["URL"] for u in related if u.get("Type") == "GET RELATED VISUALIZATION"
+                     and u.get("URL", "").startswith("https://")),
+                    None,
+                )
+                report = GranuleReport(granule_ur=granule_ur, concept_id=concept_id, browse_url=browse_url)
 
                 # Per-granule checks
                 for check_id, (_, fn) in CHECKS.items():

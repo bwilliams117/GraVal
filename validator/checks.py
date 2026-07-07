@@ -67,6 +67,19 @@ def check_schema_completeness(granule) -> CheckResult:
     return CheckResult(name, Status.PASS, "All required UMM fields present")
 
 
+_EPOCH_PLACEHOLDERS = frozenset({
+    "1970-01-01t00:00:00z",
+    "1970-01-01t00:00:00",
+    "1970-01-01",
+    "0001-01-01t00:00:00z",
+    "0001-01-01",
+})
+
+
+def _is_epoch_placeholder(dt_str: str) -> bool:
+    return dt_str.strip().lower() in _EPOCH_PLACEHOLDERS
+
+
 def check_temporal_validity(granule) -> CheckResult:
     name = "Temporal Validity"
     try:
@@ -78,6 +91,13 @@ def check_temporal_validity(granule) -> CheckResult:
 
     if not begin_str:
         return CheckResult(name, Status.FAIL, "BeginningDateTime is missing")
+
+    if _is_epoch_placeholder(begin_str):
+        return CheckResult(
+            name, Status.FAIL,
+            f"BeginningDateTime is a placeholder/epoch value: {begin_str!r} — likely a pipeline default",
+            {"beginning_datetime": begin_str},
+        )
 
     try:
         begin_dt = dateutil_parser.isoparse(begin_str)
@@ -95,6 +115,14 @@ def check_temporal_validity(granule) -> CheckResult:
 
     if end_str:
         details["ending_datetime"] = end_str
+
+        if _is_epoch_placeholder(end_str):
+            return CheckResult(
+                name, Status.FAIL,
+                f"EndingDateTime is a placeholder/epoch value: {end_str!r} — likely a pipeline default",
+                details,
+            )
+
         try:
             end_dt = dateutil_parser.isoparse(end_str)
         except Exception:
@@ -129,6 +157,8 @@ def check_spatial_validity(granule) -> CheckResult:
     errors = []
     details: dict = {"geometry_type": ", ".join(k for k in ("BoundingRectangles", "GPolygons", "Points") if k in geom)}
 
+    warnings_list: list = []
+
     if "BoundingRectangles" in geom:
         rects = geom["BoundingRectangles"]
         details["bounding_rectangles"] = len(rects)
@@ -144,6 +174,11 @@ def check_spatial_validity(granule) -> CheckResult:
                 errors.append(f"BoundingRect[{i}]: latitude out of range")
             if south > north:
                 errors.append(f"BoundingRect[{i}]: south > north")
+            if west >= east:
+                # Antimeridian-crossing granules legitimately have west > east
+                warnings_list.append(
+                    f"BoundingRect[{i}]: west ({west}) >= east ({east}) — inverted box or antimeridian crossing"
+                )
 
     if "GPolygons" in geom:
         polys = geom["GPolygons"]
@@ -164,7 +199,17 @@ def check_spatial_validity(granule) -> CheckResult:
 
     if errors:
         details["errors"] = errors
+        if warnings_list:
+            details["warnings"] = warnings_list
         return CheckResult(name, Status.FAIL, f"{len(errors)} spatial error(s) found", details)
+
+    if warnings_list:
+        details["warnings"] = warnings_list
+        return CheckResult(
+            name, Status.WARN,
+            f"{warnings_list[0]}",
+            details,
+        )
 
     return CheckResult(name, Status.PASS, "Spatial extent coordinates are valid", details)
 
@@ -233,6 +278,37 @@ def check_daynight_consistency(granule) -> CheckResult:
 
 def check_url_health(granule) -> CheckResult:
     name = "URL Health"
+    related = granule.get("umm", {}).get("RelatedUrls", [])
+
+    # ── Static RelatedUrl quality checks (no HTTP probe needed) ──────────────
+    quality_issues: list[str] = []
+
+    has_get_data = any(
+        u.get("Type") in ("GET DATA", "GET DATA VIA DIRECT ACCESS")
+        for u in related
+    )
+    if not has_get_data:
+        quality_issues.append("No RelatedUrl with Type 'GET DATA' found")
+
+    http_urls = [
+        u["URL"] for u in related
+        if u.get("URL", "").startswith("http://")
+    ]
+    if http_urls:
+        quality_issues.append(
+            f"{len(http_urls)} URL(s) use http:// instead of https://: {http_urls[0][:80]}"
+        )
+
+    no_desc = [
+        u.get("URL", "")[:60] for u in related
+        if not u.get("Description", "").strip()
+    ]
+    if no_desc:
+        quality_issues.append(
+            f"{len(no_desc)} RelatedUrl(s) missing a Description"
+        )
+
+    # ── Live download URL probe ───────────────────────────────────────────────
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
@@ -241,17 +317,26 @@ def check_url_health(granule) -> CheckResult:
             links = []
 
     if not links:
-        related = granule.get("umm", {}).get("RelatedUrls", [])
         links = [u["URL"] for u in related if u.get("Type") in ("GET DATA", "GET DATA VIA DIRECT ACCESS")]
 
     if not links:
-        return CheckResult(name, Status.FAIL, "No download URLs found")
+        details: dict = {}
+        if quality_issues:
+            details["quality_issues"] = quality_issues
+        return CheckResult(name, Status.FAIL, "No download URLs found", details)
 
     url = links[0]
 
     # S3 direct-access URLs cannot be probed via HTTP — presence alone is sufficient
     if url.startswith("s3://"):
-        return CheckResult(name, Status.PASS, f"{len(links)} URL(s) found (S3 direct access)", {"urls": links})
+        s3_details: dict = {"urls": links}
+        if quality_issues:
+            s3_details["quality_issues"] = quality_issues
+        status = Status.WARN if quality_issues else Status.PASS
+        msg = f"{len(links)} URL(s) found (S3 direct access)"
+        if quality_issues:
+            msg += f"; {len(quality_issues)} quality issue(s)"
+        return CheckResult(name, status, msg, s3_details)
 
     import earthaccess
     import requests
@@ -279,26 +364,40 @@ def check_url_health(granule) -> CheckResult:
             ssl_warning = "SSL certificate could not be verified (self-signed CDN cert)"
         except Exception as exc:
             exc_summary = str(exc).splitlines()[0][:120]
+            probe_fail: dict = {"probed_url": url, "urls": links}
+            if quality_issues:
+                probe_fail["quality_issues"] = quality_issues
             return CheckResult(
                 name, Status.WARN,
                 f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
-                {"probed_url": url, "urls": links},
+                probe_fail,
             )
     except Exception as exc:
         exc_summary = str(exc).splitlines()[0][:120]
+        probe_fail = {"probed_url": url, "urls": links}
+        if quality_issues:
+            probe_fail["quality_issues"] = quality_issues
         return CheckResult(
             name, Status.WARN,
             f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
-            {"probed_url": url, "urls": links},
+            probe_fail,
         )
 
     details = {"probed_url": url, "http_status": code, "urls": links}
     if ssl_warning:
         details["ssl_note"] = ssl_warning
+    if quality_issues:
+        details["quality_issues"] = quality_issues
 
     if 200 <= code < 300:
         # SSL cert issues on NASA's CDN are an infrastructure quirk, not a data problem —
         # the file is reachable, so this is still a PASS.
+        if quality_issues:
+            return CheckResult(
+                name, Status.WARN,
+                f"{len(links)} URL(s) found; first URL reachable (HTTP {code}); {len(quality_issues)} quality issue(s)",
+                details,
+            )
         return CheckResult(name, Status.PASS, f"{len(links)} URL(s) found; first URL reachable (HTTP {code})", details)
     elif code in (401, 403):
         return CheckResult(name, Status.WARN, f"URL access restricted (HTTP {code}) — may require different credentials", details)
@@ -380,11 +479,8 @@ def check_production_date_sanity(granule) -> CheckResult:
     if prod_dt.tzinfo is None:
         prod_dt = prod_dt.replace(tzinfo=timezone.utc)
 
-    # Sentinel: Unix epoch zero is a known pipeline placeholder
-    from datetime import timezone as _tz
-    epoch = datetime(1970, 1, 1, tzinfo=_tz.utc)
-    if prod_dt == epoch:
-        return CheckResult(name, Status.FAIL, "ProductionDateTime is Unix epoch (1970-01-01) — likely a pipeline default placeholder")
+    if _is_epoch_placeholder(prod_str):
+        return CheckResult(name, Status.FAIL, f"ProductionDateTime is a placeholder/epoch value: {prod_str!r} — likely a pipeline default")
 
     try:
         begin_str = umm["TemporalExtent"]["RangeDateTime"]["BeginningDateTime"]

@@ -1,8 +1,19 @@
+import io
+import json
 import queue
+import threading
 import tkinter as tk
 import tkinter.ttk as ttk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog
+
+import urllib3
+import earthaccess
+import requests
+from PIL import Image, ImageTk
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     import customtkinter as ctk
@@ -13,7 +24,7 @@ except ImportError:
 
 from validator.runner import ValidationRunner, ValidationRun
 from validator.checks import Status
-from validator.report import export_csv, export_summary_text, default_report_path
+from validator.report import export_csv, default_report_path
 
 _STATUS_COLORS = {
     "PASS": "#2d9e5e",
@@ -106,7 +117,6 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _on_error(self, message: str):
         # earthaccess sometimes surfaces raw CMR JSON error bodies — unwrap them
         try:
-            import json
             parsed = json.loads(message)
             errors = parsed.get("errors") or parsed.get("error")
             if errors:
@@ -176,14 +186,39 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         right = tk.Frame(paned)
         paned.add(right, minsize=260)
 
+        right_paned = tk.PanedWindow(right, orient="vertical", sashwidth=6)
+        right_paned.pack(fill="both", expand=True)
+
+        # Image pane
+        self._thumb_frame = tk.Frame(right_paned)
+        right_paned.add(self._thumb_frame, minsize=50)
+        self._thumb_label = tk.Label(
+            self._thumb_frame,
+            text="No browse image available",
+            font=("Helvetica", 9),
+            fg="#666666",
+            bg=self._thumb_frame.cget("bg"),
+            anchor="center",
+        )
+        self._thumb_label.place(relx=0.5, rely=0.5, anchor="center")
+        self._thumb_photo = None  # keep reference to prevent GC
+        self._thumb_cache: dict[str, ImageTk.PhotoImage] = {}
+
+        # Give the image pane ~40% of the right panel height after layout settles
+        right_paned.after(100, lambda: right_paned.sash_place(0, 0, int(right_paned.winfo_height() * 0.4)))
+
+        # Text pane
+        text_frame = tk.Frame(right_paned)
+        right_paned.add(text_frame, minsize=100)
+
         if _HAS_CTK:
-            self._detail_text = ctk.CTkTextbox(right, font=("Courier", 11), wrap="word")
+            self._detail_text = ctk.CTkTextbox(text_frame, font=("Courier", 11), wrap="word")
             self._detail_text.pack(fill="both", expand=True)
             self._detail_text.insert("end", "Select a granule to see check details.")
             self._detail_text.configure(state="disabled")
         else:
-            self._detail_text = tk.Text(right, font=("Courier", 10), wrap="word", state="disabled")
-            vsb2 = ttk.Scrollbar(right, orient="vertical", command=self._detail_text.yview)
+            self._detail_text = tk.Text(text_frame, font=("Courier", 10), wrap="word", state="disabled")
+            vsb2 = ttk.Scrollbar(text_frame, orient="vertical", command=self._detail_text.yview)
             self._detail_text.configure(yscrollcommand=vsb2.set)
             self._detail_text.pack(side="left", fill="both", expand=True)
             vsb2.pack(side="right", fill="y")
@@ -214,7 +249,48 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         if self._run and idx < len(self._run.granule_reports):
             self._show_detail(self._run.granule_reports[idx])
 
+    def _load_thumbnail(self, report):
+        self._thumb_label.configure(image="", text="Loading preview...")
+        self._thumb_photo = None
+
+        if not report.browse_url:
+            self._thumb_label.configure(text="No browse image available")
+            return
+
+        # Serve from cache immediately if already fetched
+        if report.browse_url in self._thumb_cache:
+            self._render_thumbnail(self._thumb_cache[report.browse_url])
+            return
+
+        def _fetch():
+            try:
+                session = earthaccess.get_requests_https_session()
+                try:
+                    resp = session.get(report.browse_url, timeout=15, stream=True)
+                except requests.exceptions.SSLError:
+                    resp = session.get(report.browse_url, timeout=15, stream=True, verify=False)
+
+                resp.raise_for_status()
+                img = Image.open(io.BytesIO(resp.content))
+                img.load()  # fully decode before leaving the thread
+                self._thumb_cache[report.browse_url] = img
+                self.after(0, lambda: self._render_thumbnail(img))
+            except Exception:
+                self.after(0, lambda: self._thumb_label.configure(image="", text="Preview unavailable"))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _render_thumbnail(self, img: Image.Image):
+        frame_w = self._thumb_frame.winfo_width() or img.width
+        frame_h = self._thumb_frame.winfo_height() or img.height
+        display = img.copy()
+        display.thumbnail((frame_w, frame_h), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(display)
+        self._thumb_photo = photo
+        self._thumb_label.configure(image=photo, text="")
+
     def _show_detail(self, report):
+        self._load_thumbnail(report)
         url = f"https://search.earthdata.nasa.gov/search/granules?p={report.concept_id}"
 
         # Resolve the underlying tk.Text widget regardless of CTk vs plain Tk
@@ -248,6 +324,9 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         textbox.insert("end", "\n")
 
+        for status, color in _STATUS_COLORS.items():
+            textbox.tag_configure(f"status_{status}", foreground=color)
+
         _uid = [0]
 
         def _make_toggle(tb, tag_closed, tag_open, tag_items):
@@ -269,7 +348,9 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         for check in report.checks:
             symbol = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}.get(check.status.value, "?")
-            textbox.insert("end", f"[{check.status.value}] {symbol} {check.check_name}\n")
+            status_tag = f"status_{check.status.value}"
+            textbox.insert("end", f"[{check.status.value}] {symbol} ", status_tag)
+            textbox.insert("end", f"{check.check_name}\n")
             textbox.insert("end", f"       {check.message}\n")
             if check.details:
                 for k, v in check.details.items():
@@ -301,13 +382,9 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                         textbox.insert("end", f"       {k}: {v}\n")
             textbox.insert("end", "\n")
 
-        if _HAS_CTK:
-            self._detail_text.configure(state="disabled")
-        else:
-            self._detail_text.configure(state="disabled")
+        self._detail_text.configure(state="disabled")
 
     def _open_url(self, url: str):
-        import webbrowser
         webbrowser.open(url)
 
     def _export_csv(self):

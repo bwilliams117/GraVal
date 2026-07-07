@@ -10,13 +10,6 @@ except ImportError:
     _BASE = tk.Tk
     _FRAME = tk.Frame
 
-COLORS = {
-    "PASS": "#2d9e5e",
-    "WARN": "#e6a817",
-    "FAIL": "#d94040",
-}
-
-
 class ValidatorApp(_BASE):
     def __init__(self):
         super().__init__()

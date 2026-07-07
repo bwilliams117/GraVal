@@ -169,10 +169,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         count = len(results)
         self._set_status(f"{count} collection(s) found" if count else "No collections found")
-        if _HAS_CTK:
-            self._search_btn.configure(state="normal")
-        else:
-            self._search_btn.configure(state="normal")
+        self._search_btn.configure(state="normal")
 
     def _set_status(self, text, error=False):
         color = "#d94040" if error else "#aaaaaa"
@@ -184,10 +181,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _on_tree_select(self, _event=None):
         sel = self._tree.selection()
         state = "normal" if sel else "disabled"
-        if _HAS_CTK:
-            self._select_btn.configure(state=state)
-        else:
-            self._select_btn.configure(state=state)
+        self._select_btn.configure(state=state)
 
     def _on_select(self):
         sel = self._tree.selection()

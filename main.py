@@ -1,4 +1,4 @@
-#!/Users/bwilliams/Projects/CGvalidator/.venv/bin/python
+#!/usr/bin/env python3
 import warnings
 
 from dotenv import load_dotenv

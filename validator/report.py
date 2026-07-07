@@ -23,29 +23,6 @@ def export_csv(run: ValidationRun, output_path: Path) -> None:
                 ])
 
 
-def export_summary_text(run: ValidationRun) -> str:
-    lines = [
-        f"Collection: {run.collection_short_name}",
-        f"Sample size: {len(run.granule_reports)} granule(s)",
-        f"Results: {run.pass_count} PASS  |  {run.warn_count} WARN  |  {run.fail_count} FAIL",
-        "",
-    ]
-    for report in run.granule_reports:
-        status_str = report.overall_status.value
-        lines.append(f"  [{status_str:4}] {report.granule_ur}")
-        for check in report.checks:
-            symbol = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}.get(check.status.value, "?")
-            lines.append(f"         {symbol} {check.check_name}: {check.message}")
-        lines.append("")
-
-    if run.errors:
-        lines.append("Errors encountered:")
-        for err in run.errors:
-            lines.append(f"  - {err}")
-
-    return "\n".join(lines)
-
-
 def default_report_path(collection_short_name: str, run: "ValidationRun | None" = None) -> Path:
     timestamp = datetime.datetime.now().strftime("%Y%m%d")
     if run is not None:

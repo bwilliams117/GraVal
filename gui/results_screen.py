@@ -1,8 +1,10 @@
 import io
+import json
 import queue
 import threading
 import tkinter as tk
 import tkinter.ttk as ttk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog
 
@@ -22,7 +24,7 @@ except ImportError:
 
 from validator.runner import ValidationRunner, ValidationRun
 from validator.checks import Status
-from validator.report import export_csv, export_summary_text, default_report_path
+from validator.report import export_csv, default_report_path
 
 _STATUS_COLORS = {
     "PASS": "#2d9e5e",
@@ -115,7 +117,6 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _on_error(self, message: str):
         # earthaccess sometimes surfaces raw CMR JSON error bodies — unwrap them
         try:
-            import json
             parsed = json.loads(message)
             errors = parsed.get("errors") or parsed.get("error")
             if errors:
@@ -381,13 +382,9 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                         textbox.insert("end", f"       {k}: {v}\n")
             textbox.insert("end", "\n")
 
-        if _HAS_CTK:
-            self._detail_text.configure(state="disabled")
-        else:
-            self._detail_text.configure(state="disabled")
+        self._detail_text.configure(state="disabled")
 
     def _open_url(self, url: str):
-        import webbrowser
         webbrowser.open(url)
 
     def _export_csv(self):

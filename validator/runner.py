@@ -217,7 +217,6 @@ class ValidationRunner:
                         else:
                             result = fn(granule)
                     except Exception as exc:
-                        from .checks import CheckResult, Status
                         result = CheckResult(
                             check_name=CHECKS[check_id][0],
                             status=Status.WARN,

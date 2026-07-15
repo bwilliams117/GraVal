@@ -92,6 +92,7 @@ class ValidationRunner:
         sample_size: int,
         temporal: tuple[str, str] | None,
         enabled_checks: set[str],
+        entry_title: str = "",
     ) -> None:
         self._cancelled.clear()
         # Drain any leftover messages from a prior run
@@ -102,7 +103,7 @@ class ValidationRunner:
                 break
         self._thread = threading.Thread(
             target=self._worker,
-            args=(short_name, sample_size, temporal, enabled_checks),
+            args=(short_name, sample_size, temporal, enabled_checks, entry_title),
             daemon=True,
         )
         self._thread.start()
@@ -113,7 +114,7 @@ class ValidationRunner:
     def _put(self, msg_type: str, payload):
         self._queue.put((msg_type, payload))
 
-    def _worker(self, short_name, sample_size, temporal, enabled_checks):
+    def _worker(self, short_name, sample_size, temporal, enabled_checks, entry_title=""):
         run = ValidationRun(collection_short_name=short_name, sample_size=sample_size)
 
         try:
@@ -213,7 +214,7 @@ class ValidationRunner:
                         continue
                     try:
                         if check_id == "collection":
-                            result = fn(granule, short_name)
+                            result = fn(granule, short_name, entry_title)
                         else:
                             result = fn(granule)
                     except Exception as exc:

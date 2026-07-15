@@ -13,8 +13,8 @@ except ImportError:
 class ValidatorApp(_BASE):
     def __init__(self):
         super().__init__()
-        self.title("NASA Granule Validator")
-        self.geometry("960x680")
+        self.title("NASA CG Validator")
+        self.geometry("1600x900")
         self.minsize(800, 560)
 
         if _HAS_CTK:

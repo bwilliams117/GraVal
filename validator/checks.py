@@ -510,23 +510,38 @@ def check_production_date_sanity(granule) -> CheckResult:
     return CheckResult(name, Status.PASS, "ProductionDateTime is after acquisition and not in the future", details)
 
 
-def check_collection_reference(granule, expected_short_name: str) -> CheckResult:
+def check_collection_reference(granule, expected_short_name: str, expected_entry_title: str = "") -> CheckResult:
     name = "Collection Reference"
     ref = granule.get("umm", {}).get("CollectionReference", {})
     if not ref:
         return CheckResult(name, Status.FAIL, "CollectionReference field is missing")
 
-    actual = ref.get("ShortName", "")
-    if not actual:
-        return CheckResult(name, Status.FAIL, "CollectionReference.ShortName is empty")
+    short_name = ref.get("ShortName", "")
+    entry_title = ref.get("EntryTitle", "")
 
-    if actual.upper() != expected_short_name.upper():
+    if not short_name and not entry_title:
+        return CheckResult(name, Status.FAIL, "CollectionReference has neither ShortName nor EntryTitle")
+
+    if short_name:
+        if short_name.upper() != expected_short_name.upper():
+            return CheckResult(
+                name, Status.FAIL,
+                f"CollectionReference ShortName '{short_name}' does not match expected '{expected_short_name}'",
+            )
+        return CheckResult(name, Status.PASS, f"CollectionReference ShortName matches '{expected_short_name}'")
+
+    # Granule uses EntryTitle only (valid per UMM-G spec)
+    if not expected_entry_title:
+        return CheckResult(
+            name, Status.WARN,
+            f"CollectionReference uses EntryTitle only: '{entry_title[:80]}' — no EntryTitle to compare against",
+        )
+    if entry_title.lower() != expected_entry_title.lower():
         return CheckResult(
             name, Status.FAIL,
-            f"CollectionReference ShortName '{actual}' does not match expected '{expected_short_name}'",
+            f"CollectionReference EntryTitle '{entry_title[:80]}' does not match expected",
         )
-
-    return CheckResult(name, Status.PASS, f"CollectionReference matches '{expected_short_name}'")
+    return CheckResult(name, Status.PASS, "CollectionReference EntryTitle matches")
 
 
 def check_duplicate_detection(granules: list) -> list[CheckResult]:

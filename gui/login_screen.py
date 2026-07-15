@@ -56,7 +56,7 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         _Label(
             container,
-            text="NASA Granule Validator",
+            text="NASA CG Validator",
             font=("Helvetica", 26, "bold"),
         ).pack(pady=(0, 6))
 

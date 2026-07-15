@@ -70,12 +70,15 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _start_validation(self):
         col = self.app.selected_collection
-        short_name = col.get("umm", {}).get("ShortName", "") if col else ""
+        umm = col.get("umm", {}) if col else {}
+        short_name = umm.get("ShortName", "")
+        entry_title = umm.get("EntryTitle", "")
         self._runner.run_async(
             short_name=short_name,
             sample_size=self._config["sample_size"],
             temporal=self._config.get("temporal"),
             enabled_checks=self._config["enabled_checks"],
+            entry_title=entry_title,
         )
         self._poll()
 

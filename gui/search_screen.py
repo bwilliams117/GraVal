@@ -9,6 +9,8 @@ except ImportError:
     _HAS_CTK = False
     ctk = None
 
+from . import theme
+
 
 class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def __init__(self, parent, app):
@@ -18,8 +20,9 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._build()
 
     def _build(self):
+        theme.setup_ttk_style()
         # ── top bar ──────────────────────────────────────────────────────────
-        top = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
+        top = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         top.pack(fill="x", padx=16, pady=(16, 8))
 
         if _HAS_CTK:
@@ -28,7 +31,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             tk.Label(top, text="Search Collections", font=("Helvetica", 16, "bold")).pack(side="left")
 
         # ── search bar ────────────────────────────────────────────────────────
-        bar = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
+        bar = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         bar.pack(fill="x", padx=16, pady=(0, 8))
 
         _DAACS = ["Any DAAC", "NSIDC", "GHRCDAAC", "PODAAC", "ASF", "ORNLDAAC",
@@ -91,11 +94,11 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         btm.pack(fill="x", padx=16, pady=(0, 16))
 
         if _HAS_CTK:
-            ctk.CTkButton(btm, text="← Back to Login", command=self.app.show_login, width=140).pack(side="left")
+            ctk.CTkButton(btm, text="← Back", command=self.app.show_home, width=140).pack(side="left")
             self._select_btn = ctk.CTkButton(btm, text="Select Collection →", command=self._on_select, state="disabled", width=180)
             self._select_btn.pack(side="right")
         else:
-            tk.Button(btm, text="← Back", command=self.app.show_login).pack(side="left")
+            tk.Button(btm, text="← Back", command=self.app.show_home).pack(side="left")
             self._select_btn = tk.Button(btm, text="Select →", command=self._on_select, state="disabled")
             self._select_btn.pack(side="right")
 
@@ -107,7 +110,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             return
         if _HAS_CTK:
             self._search_btn.configure(state="disabled")
-            self._status_label.configure(text="Searching...", text_color="white")
+            self._status_label.configure(text="Searching...", text_color=theme.TEXT_STATUS)
         else:
             self._search_btn.configure(state="disabled")
             self._status_label.configure(text="Searching...")
@@ -172,7 +175,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._search_btn.configure(state="normal")
 
     def _set_status(self, text, error=False):
-        color = "#d94040" if error else "#aaaaaa"
+        color = theme.STATUS_FAIL if error else theme.TEXT_MUTED
         if _HAS_CTK:
             self._status_label.configure(text=text, text_color=color)
         else:

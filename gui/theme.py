@@ -1,35 +1,35 @@
-# ── Accent (cyan-steel, mission-control) ─────────────────────────────────────
-ACCENT          = "#00b4d8"
-ACCENT_HOVER    = "#0096c7"
+# ── Accent (green) ────────────────────────────────────────────────────────────
+ACCENT          = "#78D68B"
+ACCENT_HOVER    = "#5fc476"
 
 # ── Surface / structural ──────────────────────────────────────────────────────
-SURFACE_0       = "#1a1c1e"   # root window / PanedWindow bg
-SURFACE_1       = "#22262a"   # card / panel frames
-SURFACE_2       = "#2b2f33"   # entry / textbox inset
+SURFACE_0       = "#121212"   # root window / PanedWindow bg
+SURFACE_1       = "#1c1c1c"   # card / panel frames
+SURFACE_2       = "#272727"   # entry / textbox inset
 
 # ── Borders ───────────────────────────────────────────────────────────────────
-BORDER_SUBTLE   = "#2e3338"
-BORDER_STRONG   = "#3d4450"
+BORDER_SUBTLE   = "#2a2a2a"
+BORDER_STRONG   = "#3a3a3a"
 
 # ── Text ──────────────────────────────────────────────────────────────────────
-TEXT_PRIMARY    = "#e2e8f0"
-TEXT_MUTED      = "#8a9bb0"
-TEXT_DISABLED   = "#4a5568"
-TEXT_STATUS     = "#e2e8f0"
+TEXT_PRIMARY    = "#ffffff"
+TEXT_MUTED      = "#9aa0a6"
+TEXT_DISABLED   = "#555555"
+TEXT_STATUS     = "#ffffff"
 
 # ── Status semantics ──────────────────────────────────────────────────────────
-STATUS_PASS     = "#22c55e"
-STATUS_PASS_HVR = "#16a34a"
+STATUS_PASS     = "#78D68B"
+STATUS_PASS_HVR = "#5fc476"
 STATUS_WARN     = "#f59e0b"
 STATUS_FAIL     = "#ef4444"
 STATUS_FAIL_HVR = "#dc2626"
 
 # ── Special purpose ───────────────────────────────────────────────────────────
-LINK            = "#38bdf8"
-LINK_HOVER      = "#7dd3fc"
-THUMB_MISSING   = "#4a5568"
-SCROLLBAR_BTN   = "#3d4450"
-SCROLLBAR_HVR   = "#546070"
+LINK            = "#78D68B"
+LINK_HOVER      = "#a8e6b4"
+THUMB_MISSING   = "#555555"
+SCROLLBAR_BTN   = "#3a3a3a"
+SCROLLBAR_HVR   = "#4a4a4a"
 
 # ── Font tuples ───────────────────────────────────────────────────────────────
 FONT_TITLE      = ("Helvetica", 26, "bold")
@@ -69,7 +69,7 @@ def setup_ttk_style() -> None:
     style.map(
         "Treeview",
         background=[("selected", ACCENT)],
-        foreground=[("selected", "#ffffff")],
+        foreground=[("selected", "#121212")],
     )
 
     style.configure(

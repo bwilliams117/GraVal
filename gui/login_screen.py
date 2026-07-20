@@ -45,7 +45,7 @@ _ENV_LABEL    = "Use .env file"
 _MANUAL_LABEL = "Enter credentials"
 
 # Fixed pixel width of the sign-in panel — never changes on toggle
-_PANEL_WIDTH  = 460
+_PANEL_WIDTH  = 660
 
 
 class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):

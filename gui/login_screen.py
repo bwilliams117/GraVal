@@ -45,7 +45,7 @@ _ENV_LABEL    = "Use .env file"
 _MANUAL_LABEL = "Enter credentials"
 
 # Fixed pixel width of the sign-in panel — never changes on toggle
-_PANEL_WIDTH  = 660
+_PANEL_WIDTH  = 700
 
 
 class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
@@ -183,10 +183,22 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                               wraplength=_PANEL_WIDTH - 56)
         self._footer.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 20))
 
-        # ── right: decorative canvas ─────────────────────────────────────────
-        self._canvas = tk.Canvas(self, bg=theme.SURFACE_0, highlightthickness=0)
-        self._canvas.grid(row=0, column=1, sticky="nsew")
-        self._canvas.bind("<Configure>", self._on_canvas_resize)
+        # ── right: image panel ───────────────────────────────────────────────
+        from PIL import Image as _PilImage
+        _assets = os.path.join(os.path.dirname(__file__), "assets")
+        self._source_img = _PilImage.open(
+            os.path.join(_assets, "image_section_login_screen.png"))
+        self._resize_job = None
+
+        if _HAS_CTK:
+            self._right = ctk.CTkLabel(self, text="", corner_radius=0,
+                                       fg_color=theme.SURFACE_0)
+            self._right.grid(row=0, column=1, sticky="nsew")
+            self._right.bind("<Configure>", self._on_canvas_resize)
+        else:
+            self._right = tk.Canvas(self, bg=theme.SURFACE_0, highlightthickness=0)
+            self._right.grid(row=0, column=1, sticky="nsew")
+            self._right.bind("<Configure>", self._on_canvas_resize)
 
     # ── mode toggle ───────────────────────────────────────────────────────────
 
@@ -202,25 +214,35 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 text="Credentials are loaded from your .env file (EARTHDATA_USERNAME / EARTHDATA_PASSWORD)")
         self._set_status("")
 
-    # ── canvas art ────────────────────────────────────────────────────────────
+    # ── image panel ───────────────────────────────────────────────────────────
 
     def _on_canvas_resize(self, event):
-        self._draw_decoration(event.width, event.height)
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(80, lambda w=event.width, h=event.height:
+                                      self._draw_decoration(w, h))
 
     def _draw_decoration(self, w, h):
-        from PIL import Image, ImageTk
-
-        c = self._canvas
-        c.delete("all")
+        self._resize_job = None
         if w < 10 or h < 10:
             return
 
-        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
-        img = Image.open(
-            os.path.join(assets_dir, "image_section_login_screen.png")
-        ).resize((w, h), Image.LANCZOS)
-        self._bg_photo = ImageTk.PhotoImage(img)
-        c.create_image(0, 0, anchor="nw", image=self._bg_photo)
+        if _HAS_CTK:
+            from PIL import Image as _Pil, ImageOps
+            import customtkinter as _ctk
+            resample = getattr(_Pil.Resampling, "LANCZOS", _Pil.LANCZOS)
+            cropped = ImageOps.fit(self._source_img, (w, h), resample)
+            self._ctk_image = _ctk.CTkImage(light_image=cropped,
+                                            dark_image=cropped,
+                                            size=(w, h))
+            self._right.configure(image=self._ctk_image)
+        else:
+            from PIL import Image as _Pil, ImageOps, ImageTk
+            resample = getattr(_Pil.Resampling, "LANCZOS", _Pil.LANCZOS)
+            cropped = ImageOps.fit(self._source_img, (w, h), resample)
+            self._bg_photo = ImageTk.PhotoImage(cropped)
+            self._right.delete("all")
+            self._right.create_image(0, 0, anchor="nw", image=self._bg_photo)
 
     # ── login flow ────────────────────────────────────────────────────────────
 

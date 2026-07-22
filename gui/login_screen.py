@@ -31,6 +31,10 @@ def _Button(parent, text, command, state="normal", **kw):
         kw.pop("fg_color", None)
         kw.pop("hover_color", None)
         kw.pop("corner_radius", None)
+        kw.pop("text_color", None)
+        kw.pop("border_color", None)
+        kw.pop("border_width", None)
+        kw.pop("height", None)
         return tk.Button(parent, text=text, command=command, state=state, **kw)
 
 def _ProgressBar(parent, mode="indeterminate"):
@@ -41,22 +45,18 @@ def _ProgressBar(parent, mode="indeterminate"):
         return ttk.Progressbar(parent, mode=mode)
 
 
-_ENV_LABEL    = "Use .env file"
-_MANUAL_LABEL = "Enter credentials"
-
-# Fixed pixel width of the sign-in panel — never changes on toggle
-_PANEL_WIDTH  = 700
+_PANEL_WIDTH = 700
+_ENTRY_W     = 340
+_ENTRY_H     = 44
 
 
 class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
-        self._manual = False
         self._build()
 
     def _build(self):
-        # Left panel fixed width, right panel takes remaining space
         self.grid_columnconfigure(0, weight=0, minsize=_PANEL_WIDTH)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -68,126 +68,139 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         else:
             left = tk.Frame(self, bg=theme.SURFACE_0, width=_PANEL_WIDTH)
         left.grid(row=0, column=0, sticky="nsew")
-        left.grid_propagate(False)   # hold fixed width regardless of content
+        left.grid_propagate(False)
         left.grid_rowconfigure(0, weight=1)
         left.grid_rowconfigure(1, weight=0)
         left.grid_columnconfigure(0, weight=1)
 
         # form area — centered via place
-        form_outer = tk.Frame(left, bg=theme.SURFACE_0)
+        if _HAS_CTK:
+            form_outer = ctk.CTkFrame(left, corner_radius=0, fg_color=theme.SURFACE_0)
+        else:
+            form_outer = tk.Frame(left, bg=theme.SURFACE_0)
         form_outer.grid(row=0, column=0, sticky="nsew")
 
-        container = tk.Frame(form_outer, bg=theme.SURFACE_0)
+        if _HAS_CTK:
+            container = ctk.CTkFrame(form_outer, corner_radius=0, fg_color=theme.SURFACE_0)
+        else:
+            container = tk.Frame(form_outer, bg=theme.SURFACE_0)
         container.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Title + subtitle
-        if _HAS_CTK:
-            ctk.CTkLabel(container, text="Sign into Vernier",
-                         font=("Helvetica", 26, "bold"),
-                         text_color=theme.TEXT_PRIMARY).pack(pady=(0, 4))
-            ctk.CTkLabel(container,
-                         text="use your earthdata login",
-                         font=("Helvetica", 11),
-                         text_color=theme.TEXT_MUTED).pack(pady=(0, 20))
-        else:
-            tk.Label(container, text="Sign into Vernier",
-                     font=("Helvetica", 22, "bold"),
-                     bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY).pack(pady=(0, 4))
-            tk.Label(container,
-                     text="use your earthdata login",
-                     font=("Helvetica", 10),
-                     bg=theme.SURFACE_0, fg=theme.TEXT_MUTED).pack(pady=(0, 16))
+        # Title + subtitle — use tk.Label unconditionally; CTkLabel clips descenders on large fonts
+        tk.Label(container, text="Sign in",
+                 font=("Helvetica", 32, "bold"),
+                 bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY).pack(pady=(0, 6))
+        tk.Label(container,
+                 text="use your Earthdata login",
+                 font=("Helvetica", 13),
+                 bg=theme.SURFACE_0, fg=theme.TEXT_MUTED).pack(pady=(0, 32))
 
-        # Mode selector
+        # Username
         if _HAS_CTK:
-            self._mode_widget = ctk.CTkSegmentedButton(
-                container,
-                values=[_ENV_LABEL, _MANUAL_LABEL],
-                command=self._on_mode_change,
-                width=300,
-            )
-            self._mode_widget.set(_ENV_LABEL)
-            self._mode_widget.pack(pady=(0, 0))
-        else:
-            self._mode_widget = tk.Frame(container, bg=theme.SURFACE_0)
-            self._mode_widget.pack(pady=(0, 0))
-            self._mode_tk_var = tk.StringVar(value="env")
-            tk.Radiobutton(
-                self._mode_widget, text=_ENV_LABEL,
-                variable=self._mode_tk_var, value="env",
-                command=lambda: self._on_mode_change("env"),
-                bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY,
-            ).pack(side="left", padx=8)
-            tk.Radiobutton(
-                self._mode_widget, text=_MANUAL_LABEL,
-                variable=self._mode_tk_var, value="manual",
-                command=lambda: self._on_mode_change("manual"),
-                bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY,
-            ).pack(side="left", padx=8)
-
-        # Fixed-height credentials area — always occupies space, preventing layout shift
-        creds_area = tk.Frame(container, bg=theme.SURFACE_0, width=300, height=130)
-        creds_area.pack(pady=(4, 0))
-        creds_area.pack_propagate(False)
-
-        if _HAS_CTK:
-            self._creds_frame = ctk.CTkFrame(creds_area, fg_color="transparent")
-            ctk.CTkLabel(self._creds_frame, text="Username",
-                         font=("Helvetica", 11)).pack(anchor="w", padx=4)
+            ctk.CTkLabel(container, text="Username",
+                         font=("Helvetica", 12),
+                         text_color=theme.TEXT_MUTED,
+                         anchor="w").pack(anchor="w", padx=2, pady=(0, 5))
             self._user_entry = ctk.CTkEntry(
-                self._creds_frame, placeholder_text="Earthdata username", width=300)
-            self._user_entry.pack(pady=(2, 8))
-            ctk.CTkLabel(self._creds_frame, text="Password",
-                         font=("Helvetica", 11)).pack(anchor="w", padx=4)
-            self._pass_entry = ctk.CTkEntry(
-                self._creds_frame, placeholder_text="Earthdata password",
-                show="•", width=300)
-            self._pass_entry.pack(pady=(2, 0))
+                container, placeholder_text="Earthdata username",
+                width=_ENTRY_W, height=_ENTRY_H,
+                font=("Helvetica", 13))
+            self._user_entry.pack(pady=(0, 18))
         else:
-            self._creds_frame = tk.Frame(creds_area, bg=theme.SURFACE_0)
-            tk.Label(self._creds_frame, text="Username",
-                     bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY).pack(anchor="w")
-            self._user_entry = tk.Entry(self._creds_frame, width=36)
-            self._user_entry.pack(pady=(0, 6))
-            tk.Label(self._creds_frame, text="Password",
-                     bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY).pack(anchor="w")
-            self._pass_entry = tk.Entry(self._creds_frame, show="•", width=36)
-            self._pass_entry.pack()
-        # hidden by default; shown via place() in _on_mode_change
+            tk.Label(container, text="Username",
+                     font=("Helvetica", 12),
+                     bg=theme.SURFACE_0, fg=theme.TEXT_MUTED).pack(anchor="w", padx=2)
+            self._user_entry = tk.Entry(container, width=36, font=("Helvetica", 13))
+            self._user_entry.pack(pady=(5, 18))
+
+        # Password
+        if _HAS_CTK:
+            ctk.CTkLabel(container, text="Password",
+                         font=("Helvetica", 12),
+                         text_color=theme.TEXT_MUTED,
+                         anchor="w").pack(anchor="w", padx=2, pady=(0, 5))
+            self._pass_entry = ctk.CTkEntry(
+                container, placeholder_text="Earthdata password",
+                show="•", width=_ENTRY_W, height=_ENTRY_H,
+                font=("Helvetica", 13))
+            self._pass_entry.pack(pady=(0, 0))
+        else:
+            tk.Label(container, text="Password",
+                     font=("Helvetica", 12),
+                     bg=theme.SURFACE_0, fg=theme.TEXT_MUTED).pack(anchor="w", padx=2)
+            self._pass_entry = tk.Entry(container, show="•", width=36,
+                                        font=("Helvetica", 13))
+            self._pass_entry.pack(pady=(5, 0))
 
         # Status + progress
         self._status_label = _Label(container, text="", font=("Helvetica", 11))
-        self._status_label.pack(pady=(8, 4))
+        self._status_label.pack(pady=(14, 4))
 
         self._progress = _ProgressBar(container, mode="indeterminate")
-        self._progress.pack(fill="x", padx=4, pady=(0, 12))
+        self._progress.pack(fill="x", padx=2, pady=(0, 14))
         if _HAS_CTK:
             self._progress.set(0)
         else:
             self._progress.stop()
 
-        # Login button
+        # Primary: login with entered credentials
         self._btn = _Button(
             container, text="Login",
             command=self._on_login,
-            width=300,
-            fg_color=theme.STATUS_PASS,
-            hover_color=theme.STATUS_PASS_HVR,
+            width=_ENTRY_W, height=_ENTRY_H,
+            fg_color=theme.ACCENT,
+            hover_color=theme.ACCENT_HOVER,
+            text_color="#121212",
+            font=("Helvetica", 13, "bold"),
         )
         self._btn.pack()
 
-        # Footer pinned to bottom of left panel
-        footer_text = "Credentials are loaded from your .env file (EARTHDATA_USERNAME / EARTHDATA_PASSWORD)"
-        self._footer = _Label(left, text=footer_text, font=("Helvetica", 9),
-                              text_color=theme.TEXT_DISABLED,
-                              wraplength=_PANEL_WIDTH - 56)
-        self._footer.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 20))
+        # Secondary: login via .env file
+        self._env_btn = _Button(
+            container, text="Sign in with .env",
+            command=self._on_env_login,
+            width=_ENTRY_W, height=40,
+            fg_color=theme.SURFACE_2,
+            hover_color=theme.BORDER_STRONG,
+            text_color=theme.TEXT_MUTED,
+            border_width=1,
+            border_color=theme.BORDER_STRONG,
+            font=("Helvetica", 12),
+        )
+        self._env_btn.pack(pady=(10, 0))
+
+        # ── Footer pinned to bottom of left panel ─────────────────────────
+        footer_frame = tk.Frame(left, bg=theme.SURFACE_0)
+        footer_frame.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 22))
+
+        if _HAS_CTK:
+            ctk.CTkLabel(footer_frame, text="GraVal",
+                         font=("Helvetica", 20, "bold"),
+                         text_color=theme.ACCENT,
+                         anchor="center").pack(anchor="center", pady=(0, 5))
+            ctk.CTkLabel(footer_frame,
+                         text="Your credentials are never stored.",
+                         font=("Helvetica", 9),
+                         text_color=theme.TEXT_DISABLED,
+                         anchor="center",
+                         justify="center",
+                         wraplength=_PANEL_WIDTH - 56).pack(anchor="center")
+        else:
+            tk.Label(footer_frame, text="GraVal",
+                     font=("Helvetica", 14, "bold"),
+                     bg=theme.SURFACE_0, fg=theme.ACCENT).pack(anchor="center", pady=(0, 5))
+            tk.Label(footer_frame,
+                     text="Your credentials are never stored. Sign in manually above or use your .env file (EARTHDATA_USERNAME / EARTHDATA_PASSWORD).",
+                     font=("Helvetica", 9),
+                     bg=theme.SURFACE_0, fg=theme.TEXT_DISABLED,
+                     justify="center",
+                     wraplength=_PANEL_WIDTH - 56).pack(anchor="center")
 
         # ── right: image panel ───────────────────────────────────────────────
         from PIL import Image as _PilImage
         _assets = os.path.join(os.path.dirname(__file__), "assets")
         self._source_img = _PilImage.open(
-            os.path.join(_assets, "image_section_login_screen.png"))
+            os.path.join(_assets, "login_screen_right_pane.webp"))
         self._resize_job = None
 
         if _HAS_CTK:
@@ -199,20 +212,6 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._right = tk.Canvas(self, bg=theme.SURFACE_0, highlightthickness=0)
             self._right.grid(row=0, column=1, sticky="nsew")
             self._right.bind("<Configure>", self._on_canvas_resize)
-
-    # ── mode toggle ───────────────────────────────────────────────────────────
-
-    def _on_mode_change(self, value):
-        self._manual = value in (_MANUAL_LABEL, "manual")
-        if self._manual:
-            self._creds_frame.place(x=0, y=0, relwidth=1)
-            self._footer.configure(
-                text="Your credentials are used only for this session and are not stored.")
-        else:
-            self._creds_frame.place_forget()
-            self._footer.configure(
-                text="Credentials are loaded from your .env file (EARTHDATA_USERNAME / EARTHDATA_PASSWORD)")
-        self._set_status("")
 
     # ── image panel ───────────────────────────────────────────────────────────
 
@@ -247,21 +246,25 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     # ── login flow ────────────────────────────────────────────────────────────
 
     def _on_login(self):
-        if self._manual:
-            username = self._user_entry.get().strip()
-            password = self._pass_entry.get()
-            if not username or not password:
-                self._on_failure("Please enter both username and password")
-                return
-        else:
-            username = password = None
+        username = self._user_entry.get().strip()
+        password = self._pass_entry.get()
+        if not username or not password:
+            self._on_failure("Please enter both username and password")
+            return
+        self._start_login(username, password)
 
+    def _on_env_login(self):
+        self._start_login(None, None)
+
+    def _start_login(self, username, password):
         if _HAS_CTK:
             self._btn.configure(state="disabled")
+            self._env_btn.configure(state="disabled")
             self._progress.configure(mode="indeterminate")
             self._progress.start()
         else:
             self._btn.configure(state="disabled")
+            self._env_btn.configure(state="disabled")
             self._progress.start()
         self._set_status("Authenticating with NASA Earthdata Login...")
         threading.Thread(target=self._login_worker, args=(username, password), daemon=True).start()
@@ -303,7 +306,9 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._progress.stop()
             self._progress.set(0)
             self._btn.configure(state="normal")
+            self._env_btn.configure(state="normal")
         else:
             self._progress.stop()
             self._btn.configure(state="normal")
+            self._env_btn.configure(state="normal")
         self._set_status(f"Error: {message}", color=theme.STATUS_FAIL)

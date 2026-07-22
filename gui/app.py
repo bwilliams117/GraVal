@@ -13,7 +13,7 @@ except ImportError:
 class ValidatorApp(_BASE):
     def __init__(self):
         super().__init__()
-        self.title("Vernier")
+        self.title("GraVal")
         self.geometry("1600x900")
         self.minsize(800, 560)
 

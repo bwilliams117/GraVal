@@ -59,7 +59,7 @@ class HomeScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         hdr = _Frame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=24, pady=(20, 0))
 
-        _Label(hdr, text="Vernier", font=("Helvetica", 22, "bold")).pack(side="left")
+        _Label(hdr, text="GraVal", font=("Helvetica", 22, "bold")).pack(side="left")
 
         _Button(
             hdr, text="Sign Out", command=self._on_signout,
@@ -98,40 +98,55 @@ class HomeScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _make_card(self, container, title, desc, action_key, row, col):
         if _HAS_CTK:
-            card = ctk.CTkFrame(container, corner_radius=10, border_width=1, border_color=theme.BORDER_SUBTLE)
+            card = ctk.CTkFrame(
+                container, corner_radius=10, border_width=0,
+                fg_color=theme.SURFACE_2, width=300,
+            )
         else:
             card = tk.LabelFrame(container, relief="groove", bd=2)
 
-        card.grid(row=row, column=col, padx=12, pady=12, sticky="nsew")
-        card.grid_rowconfigure(1, weight=1)
+        card.grid(row=row, column=col, padx=14, pady=14, sticky="nw")
         card.grid_columnconfigure(0, weight=1)
+
+        # Accent top strip
+        if _HAS_CTK:
+            strip = ctk.CTkFrame(card, height=5, fg_color=theme.ACCENT, corner_radius=0)
+            strip.grid(row=0, column=0, sticky="ew")
+            strip.grid_propagate(False)
 
         # Title
         _Label(
             card,
             text=title,
-            font=("Helvetica", 15, "bold"),
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 6))
+            font=theme.FONT_H4,
+            text_color=theme.TEXT_PRIMARY,
+        ).grid(row=1, column=0, sticky="w", padx=18, pady=(14, 4))
+
+        # Separator
+        tk.Frame(card, height=1, bg=theme.BORDER_STRONG).grid(
+            row=2, column=0, sticky="ew", padx=18, pady=(4, 0),
+        )
 
         # Description
         _Label(
             card,
             text=desc,
-            font=("Helvetica", 11),
+            font=theme.FONT_SMALL,
             text_color=theme.TEXT_MUTED,
-            wraplength=280,
+            wraplength=250,
             justify="left",
-        ).grid(row=1, column=0, sticky="nw", padx=16, pady=(0, 12))
+        ).grid(row=3, column=0, sticky="nw", padx=18, pady=(10, 4))
 
         # Launch button
         _Button(
             card,
             text="Launch",
             command=lambda ak=action_key: getattr(self.app, ak)(),
-            fg_color=theme.STATUS_PASS,
-            hover_color=theme.STATUS_PASS_HVR,
-            width=120,
-        ).grid(row=2, column=0, sticky="w", padx=16, pady=(0, 16))
+            fg_color=theme.ACCENT,
+            hover_color=theme.ACCENT_HOVER,
+            text_color=theme.SURFACE_0,
+            width=100,
+        ).grid(row=4, column=0, sticky="w", padx=18, pady=(10, 18))
 
     def _on_signout(self):
         self.app.auth = None

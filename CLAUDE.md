@@ -22,6 +22,8 @@ Login uses `earthaccess.login(strategy="environment")`. Manual entry in the GUI 
 ```
 main.py                  — entry point; loads .env, suppresses FutureWarnings from earthaccess, launches GUI
 gui/
+  assets/                — static assets; currently contains login_screen_right_pane.webp (right-panel
+                           background image loaded by login_screen.py via PIL)
   theme.py               — centralised palette: ACCENT (#00b4d8 cyan-steel), ACCENT_HOVER, SURFACE_0/1/2,
                            BORDER_SUBTLE/STRONG, TEXT_PRIMARY/MUTED/DISABLED/STATUS, STATUS_PASS/PASS_HVR/
                            WARN/FAIL/FAIL_HVR, LINK/LINK_HOVER, THUMB_MISSING, SCROLLBAR_BTN/HVR; FONT_*
@@ -30,21 +32,21 @@ gui/
                            all screens import from here — no inline hex strings anywhere else
   theme.json             — CTk custom color theme; accent #00b4d8 replaces CTk default blue; loaded by
                            absolute path via os.path.join(__file__, "theme.json") in app.py
-  app.py                 — ValidatorApp (CTk/Tk root); title "Vernier"; 1600x900 window, minsize 800x560;
+  app.py                 — ValidatorApp (CTk/Tk root); title "GraVal"; 1600x900 window, minsize 800x560;
                            loads theme.json by absolute path; dark mode; shared state (auth,
                            selected_collection, last_validation_run); drives screen transitions via
                            show_login/show_home/show_search/show_config/show_results()
-  login_screen.py        — split-pane auth screen: left panel = form (V-badge logo, "Sign in to Vernier"
-                           heading, CTkSegmentedButton .env vs manual mode, credential entries, progress
-                           bar, Login button, footer text); right panel = tk.Canvas decorative instrument
-                           art (programmatic Vernier dial face: subtle background grid, crosshair, 5
-                           concentric rings, 60 tick marks with cardinal/major/minor styling in
-                           theme.ACCENT, inner arc segment ring, partial cyan accent arc, center dot,
-                           "VERNIER" wordmark); canvas redraws on <Configure>; background thread for
+  login_screen.py        — split-pane auth screen: left panel = form ("Sign in" heading, "use your
+                           Earthdata login" subtitle, Username entry, Password entry, status label,
+                           progress bar, primary "Login" button (uses entered credentials), secondary
+                           "Sign in with .env" button, footer with "GraVal" branding and privacy note);
+                           right panel = CTkLabel (CTk) or tk.Canvas (plain Tk) displaying a
+                           cover-cropped version of gui/assets/login_screen_right_pane.webp, resized on
+                           <Configure> via PIL ImageOps.fit with 80ms debounce; background thread for
                            earthaccess.login(); on success → app.show_home(); env vars injected/restored
-                           on manual login
+                           when manual credentials are used
   home_screen.py         — card-based dashboard (tool bag); shown after login, before search; header bar
-                           with "Vernier" title + "Sign Out" button; 3-column CTkScrollableFrame grid of
+                           with "GraVal" title + "Sign Out" button; 3-column CTkScrollableFrame grid of
                            tool cards; currently one card: "Granule Validator" → app.show_search(); Sign
                            Out clears auth/selected_collection/last_validation_run → show_login()
   search_screen.py       — collection search; calls theme.setup_ttk_style(); populates ttk.Treeview
@@ -53,7 +55,8 @@ gui/
                            searches both on-prem and cloud providers to avoid missing cloud collections
                            (e.g. EMIT via LPCLOUD); Back button → app.show_home()
   config_screen.py       — sample size slider (1–50), optional date range (YYYY-MM-DD), check toggles
-                           (one per check_id from ALL_CHECK_IDS); passes config dict to show_results()
+                           (one per check_id from ALL_CHECK_IDS); Back button → app.show_search();
+                           passes config dict to show_results()
   results_screen.py      — runs ValidationRunner in background; progress bar with Cancel button (→
                            show_config()); 100ms polling loop via self.after(100, self._poll); calls
                            theme.setup_ttk_style(); split-pane detail view with collapsible lists;
@@ -81,12 +84,13 @@ All screens support both `customtkinter` (preferred) and plain `tkinter` via `_H
 ## Navigation Flow
 ```
 LoginScreen → HomeScreen → SearchScreen → ConfigScreen → ResultsScreen
-                  ↑              ↑ (Back)
-              (Sign Out)     HomeScreen
+                  ↑              ↑ (Back)       ↑ (Back)
+              (Sign Out)     HomeScreen      SearchScreen
 ```
 - Login success → `show_home()`
 - HomeScreen Sign Out → clears `auth`/`selected_collection`/`last_validation_run` → `show_login()`
 - SearchScreen Back → `show_home()` (not `show_login()`)
+- ConfigScreen Back → `show_search()`
 - ResultsScreen Cancel or "← New Validation" → `show_config()`
 
 ## Validation Checks (`validator/checks.py`)

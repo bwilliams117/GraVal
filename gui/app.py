@@ -18,9 +18,10 @@ class ValidatorApp(_BASE):
         self.minsize(800, 560)
 
         if _HAS_CTK:
-            import os
+            import os, sys
             ctk.set_appearance_mode("dark")
-            ctk.set_default_color_theme(os.path.join(os.path.dirname(__file__), "theme.json"))
+            _base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
+            ctk.set_default_color_theme(os.path.join(_base, "gui", "theme.json") if hasattr(sys, "_MEIPASS") else os.path.join(os.path.dirname(__file__), "theme.json"))
 
         # Shared state
         self.auth = None

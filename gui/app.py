@@ -13,13 +13,15 @@ except ImportError:
 class ValidatorApp(_BASE):
     def __init__(self):
         super().__init__()
-        self.title("NASA CG Validator")
+        self.title("GraVal")
         self.geometry("1600x900")
         self.minsize(800, 560)
 
         if _HAS_CTK:
+            import os, sys
             ctk.set_appearance_mode("dark")
-            ctk.set_default_color_theme("blue")
+            _base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
+            ctk.set_default_color_theme(os.path.join(_base, "gui", "theme.json") if hasattr(sys, "_MEIPASS") else os.path.join(os.path.dirname(__file__), "theme.json"))
 
         # Shared state
         self.auth = None
@@ -40,6 +42,10 @@ class ValidatorApp(_BASE):
     def show_login(self):
         from .login_screen import LoginScreen
         self._replace_screen(LoginScreen(self, self))
+
+    def show_home(self):
+        from .home_screen import HomeScreen
+        self._replace_screen(HomeScreen(self, self))
 
     def show_search(self):
         from .search_screen import SearchScreen

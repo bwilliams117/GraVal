@@ -7,6 +7,7 @@ except ImportError:
     _HAS_CTK = False
     ctk = None
 
+from . import theme
 from validator.runner import ALL_CHECK_IDS, CHECKS
 
 
@@ -24,7 +25,7 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         version = umm.get("Version", "?")
 
         # ── header ────────────────────────────────────────────────────────────
-        hdr = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
+        hdr = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         hdr.pack(fill="x", padx=16, pady=(16, 4))
 
         title_text = f"Configure Validation — {short_name} v{version}"
@@ -35,10 +36,10 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         # concept id sub-label
         cid = col.get("meta", {}).get("concept-id", "") if col else ""
-        sub = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
+        sub = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         sub.pack(fill="x", padx=16, pady=(0, 12))
         if _HAS_CTK:
-            ctk.CTkLabel(sub, text=f"Concept ID: {cid}", font=("Helvetica", 10), text_color="#aaaaaa").pack(side="left")
+            ctk.CTkLabel(sub, text=f"Concept ID: {cid}", font=("Helvetica", 10), text_color=theme.TEXT_MUTED).pack(side="left")
         else:
             tk.Label(sub, text=f"Concept ID: {cid}", font=("Helvetica", 9)).pack(side="left")
 
@@ -127,7 +128,7 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(btm, text="← Back", command=self.app.show_search, width=100).pack(side="left")
-            ctk.CTkButton(btm, text="Run Validation →", command=self._on_run, width=180, fg_color="#2d9e5e", hover_color="#25854f").pack(side="right")
+            ctk.CTkButton(btm, text="Run Validation →", command=self._on_run, width=180, fg_color=theme.STATUS_PASS, hover_color=theme.STATUS_PASS_HVR).pack(side="right")
         else:
             tk.Button(btm, text="← Back", command=self.app.show_search).pack(side="left")
             tk.Button(btm, text="Run Validation →", command=self._on_run).pack(side="right")

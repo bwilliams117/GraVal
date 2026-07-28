@@ -1,4 +1,8 @@
-# ── Accent (green) ────────────────────────────────────────────────────────────
+"""Centralised design tokens: colours, fonts, and ttk widget styles."""
+
+import tkinter.ttk as ttk
+
+# ── Accent ────────────────────────────────────────────────────────────────────
 ACCENT          = "#78D68B"
 ACCENT_HOVER    = "#5fc476"
 
@@ -48,8 +52,7 @@ FONT_MONO_SMALL = ("Courier", 10)
 
 
 def setup_ttk_style() -> None:
-    import tkinter.ttk as ttk
-
+    """Apply the dark-theme styles to ttk.Treeview and Vertical.TScrollbar."""
     style = ttk.Style()
     try:
         style.theme_use("clam")

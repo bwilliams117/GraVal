@@ -1,16 +1,21 @@
+"""Root application window and screen-transition controller."""
+
+import os
+import sys
 import tkinter as tk
 
 try:
     import customtkinter as ctk
     _HAS_CTK = True
     _BASE = ctk.CTk
-    _FRAME = ctk.CTkFrame
 except ImportError:
     _HAS_CTK = False
     _BASE = tk.Tk
-    _FRAME = tk.Frame
+
 
 class ValidatorApp(_BASE):
+    """Top-level window that owns shared state and drives screen transitions."""
+
     def __init__(self):
         super().__init__()
         self.title("GraVal")
@@ -18,12 +23,17 @@ class ValidatorApp(_BASE):
         self.minsize(800, 560)
 
         if _HAS_CTK:
-            import os, sys
             ctk.set_appearance_mode("dark")
+            # Support both frozen (PyInstaller) and normal execution paths.
             _base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
-            ctk.set_default_color_theme(os.path.join(_base, "gui", "theme.json") if hasattr(sys, "_MEIPASS") else os.path.join(os.path.dirname(__file__), "theme.json"))
+            theme_path = (
+                os.path.join(_base, "gui", "theme.json")
+                if hasattr(sys, "_MEIPASS")
+                else os.path.join(os.path.dirname(__file__), "theme.json")
+            )
+            ctk.set_default_color_theme(theme_path)
 
-        # Shared state
+        # Shared state passed between screens.
         self.auth = None
         self.selected_collection = None
         self.last_validation_run = None
@@ -31,9 +41,10 @@ class ValidatorApp(_BASE):
 
         self.show_login()
 
-    # ── navigation ────────────────────────────────────────────────────────────
+    # ── screen transitions ────────────────────────────────────────────────────
 
     def _replace_screen(self, screen):
+        """Destroy the current screen and pack the new one."""
         if self._current_screen is not None:
             self._current_screen.destroy()
         self._current_screen = screen

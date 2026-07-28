@@ -1,3 +1,5 @@
+"""Background validation runner: samples granules from CMR and runs checks."""
+
 import queue
 import random
 import threading
@@ -7,6 +9,7 @@ from typing import Callable
 
 import earthaccess
 import requests as _requests
+from earthaccess.results import DataGranule
 
 from .checks import (
     CheckResult,
@@ -22,25 +25,34 @@ from .checks import (
     check_url_health,
 )
 
-# Registry: check_id → (label, function)
-# Per-granule checks take (granule,); collection_reference takes (granule, short_name)
-CHECKS = {
-    "schema":       ("Schema Completeness",        check_schema_completeness),
-    "temporal":     ("Temporal Validity",           check_temporal_validity),
-    "spatial":      ("Spatial Validity",            check_spatial_validity),
-    "daynight":     ("Day/Night Consistency",       check_daynight_consistency),
-    "url_health":   ("URL Health",                  check_url_health),
-    "file_size":    ("File Size Sanity",            check_file_size_sanity),
-    "prod_date":    ("Production Date Sanity",      check_production_date_sanity),
-    "collection":   ("Collection Reference",        check_collection_reference),
-    "duplicates":   ("Duplicate Detection",         None),  # handled separately (whole-sample check)
+
+# Registry of check_id → (display_label, function).
+# Per-granule checks receive (granule,); collection_reference receives
+# (granule, short_name, entry_title).  None marks a whole-sample check
+# handled outside the per-granule loop.
+CHECKS: dict[str, tuple[str, Callable | None]] = {
+    "schema":       ("Schema Completeness",   check_schema_completeness),
+    "temporal":     ("Temporal Validity",      check_temporal_validity),
+    "spatial":      ("Spatial Validity",       check_spatial_validity),
+    "daynight":     ("Day/Night Consistency",  check_daynight_consistency),
+    "url_health":   ("URL Health",             check_url_health),
+    "file_size":    ("File Size Sanity",       check_file_size_sanity),
+    "prod_date":    ("Production Date Sanity", check_production_date_sanity),
+    "collection":   ("Collection Reference",   check_collection_reference),
+    "duplicates":   ("Duplicate Detection",    None),
 }
 
 ALL_CHECK_IDS = list(CHECKS.keys())
 
+# CMR rejects page_num * page_size > 1,000,000; page_size=1 so this is the
+# maximum page_num we can request.
+_CMR_MAX_DEPTH = 1_000_000
+
 
 @dataclass
 class GranuleReport:
+    """Aggregated validation results for a single granule."""
+
     granule_ur: str
     concept_id: str
     browse_url: str | None = None
@@ -58,6 +70,8 @@ class GranuleReport:
 
 @dataclass
 class ValidationRun:
+    """Complete results for a single validation session."""
+
     collection_short_name: str
     sample_size: int
     granule_reports: list[GranuleReport] = field(default_factory=list)
@@ -77,6 +91,8 @@ class ValidationRun:
 
 
 class ValidationRunner:
+    """Executes a validation run on a background thread and exposes results via a queue."""
+
     def __init__(self):
         self._queue: queue.Queue = queue.Queue()
         self._cancelled = threading.Event()
@@ -94,8 +110,8 @@ class ValidationRunner:
         enabled_checks: set[str],
         entry_title: str = "",
     ) -> None:
+        """Start a new validation run, replacing any previous state."""
         self._cancelled.clear()
-        # Drain any leftover messages from a prior run
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
@@ -109,6 +125,7 @@ class ValidationRunner:
         self._thread.start()
 
     def cancel(self) -> None:
+        """Signal the worker thread to stop at its next cancellation checkpoint."""
         self._cancelled.set()
 
     def _put(self, msg_type: str, payload):
@@ -120,8 +137,6 @@ class ValidationRunner:
         try:
             self._put("progress", (0, 1, f"Searching for granules in {short_name}..."))
 
-            # One fetch builds the bucket. Use a random offset so the bucket
-            # isn't always the same 50 most-recent granules.
             query = earthaccess.DataGranules().short_name(short_name)
             if temporal and temporal[0]:
                 query = query.temporal(*temporal)
@@ -137,13 +152,7 @@ class ValidationRunner:
                 self._put("cancelled", None)
                 return
 
-            # Each granule is fetched from an independently chosen random page,
-            # so picks are spread across the full collection history rather than
-            # clustered in one time window. CMR rejects page_num * page_size > 1,000,000.
-            CMR_MAX_DEPTH = 1_000_000
-            max_page = min(total_count, CMR_MAX_DEPTH)  # page_size=1 so max_page = max_depth
-
-            from earthaccess.results import DataGranule
+            max_page = min(total_count, _CMR_MAX_DEPTH)
             session = earthaccess.get_requests_https_session()
 
             base_params = {"short_name": short_name, "page_size": 1}
@@ -152,15 +161,16 @@ class ValidationRunner:
 
             need = min(sample_size, total_count)
             sample = []
-            total = need
 
             for i in range(need):
                 if self._cancelled.is_set():
                     self._put("cancelled", None)
                     return
 
-                self._put("progress", (i, total, f"Sampling granules ({i}/{total})..."))
+                self._put("progress", (i, need, f"Sampling granules ({i}/{need})..."))
 
+                # Each granule is fetched from an independently chosen random page
+                # so picks are spread across the full collection history.
                 page_num = random.randint(1, max_page)
                 resp = session.get(
                     "https://cmr.earthdata.nasa.gov/search/granules.umm_json",
@@ -173,8 +183,10 @@ class ValidationRunner:
 
                 item = items[0]
                 cloud = any(
-                    "s3://" in (l.get("URL", "") if isinstance(l, dict) else "")
-                    for l in item.get("umm", {}).get("RelatedUrls", [])
+                    "s3://" in (
+                        ln.get("URL", "") if isinstance(ln, dict) else ""
+                    )
+                    for ln in item.get("umm", {}).get("RelatedUrls", [])
                 )
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -184,9 +196,9 @@ class ValidationRunner:
                 run.errors.append(f"No granules found for collection '{short_name}'")
                 self._put("done", run)
                 return
+
             total = len(sample)
 
-            # Duplicate detection across the whole sample
             dup_results: list[CheckResult] = []
             if "duplicates" in enabled_checks:
                 dup_results = check_duplicate_detection(sample)
@@ -202,13 +214,19 @@ class ValidationRunner:
 
                 related = granule.get("umm", {}).get("RelatedUrls", [])
                 browse_url = next(
-                    (u["URL"] for u in related if u.get("Type") == "GET RELATED VISUALIZATION"
-                     and u.get("URL", "").startswith("https://")),
+                    (
+                        u["URL"] for u in related
+                        if u.get("Type") == "GET RELATED VISUALIZATION"
+                        and u.get("URL", "").startswith("https://")
+                    ),
                     None,
                 )
-                report = GranuleReport(granule_ur=granule_ur, concept_id=concept_id, browse_url=browse_url)
+                report = GranuleReport(
+                    granule_ur=granule_ur,
+                    concept_id=concept_id,
+                    browse_url=browse_url,
+                )
 
-                # Per-granule checks
                 for check_id, (_, fn) in CHECKS.items():
                     if check_id not in enabled_checks or fn is None:
                         continue
@@ -225,7 +243,6 @@ class ValidationRunner:
                         )
                     report.checks.append(result)
 
-                # Attach this granule's duplicate result
                 if "duplicates" in enabled_checks and dup_results:
                     report.checks.append(dup_results[idx])
 

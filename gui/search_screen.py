@@ -1,6 +1,11 @@
+"""Search screen: collection keyword search backed by the CMR API."""
+
 import threading
 import tkinter as tk
 import tkinter.ttk as ttk
+
+import earthaccess
+from earthaccess.daac import find_provider
 
 try:
     import customtkinter as ctk
@@ -12,7 +17,15 @@ except ImportError:
 from . import theme
 
 
+_DAACS = [
+    "Any DAAC", "NSIDC", "GHRCDAAC", "PODAAC", "ASF",
+    "ORNLDAAC", "LPDAAC", "GES_DISC", "OBDAAC", "SEDAC", "LAADS", "ASDC",
+]
+
+
 class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
+    """Collection search with DAAC filter and paginated Treeview results."""
+
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -21,31 +34,38 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _build(self):
         theme.setup_ttk_style()
-        # ── top bar ──────────────────────────────────────────────────────────
+
         top = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         top.pack(fill="x", padx=16, pady=(16, 8))
 
         if _HAS_CTK:
-            ctk.CTkLabel(top, text="Search Collections", font=("Helvetica", 20, "bold")).pack(side="left")
+            ctk.CTkLabel(
+                top, text="Search Collections", font=("Helvetica", 20, "bold")
+            ).pack(side="left")
         else:
-            tk.Label(top, text="Search Collections", font=("Helvetica", 16, "bold")).pack(side="left")
+            tk.Label(
+                top, text="Search Collections", font=("Helvetica", 16, "bold")
+            ).pack(side="left")
 
-        # ── search bar ────────────────────────────────────────────────────────
         bar = ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         bar.pack(fill="x", padx=16, pady=(0, 8))
-
-        _DAACS = ["Any DAAC", "NSIDC", "GHRCDAAC", "PODAAC", "ASF", "ORNLDAAC",
-                  "LPDAAC", "GES_DISC", "OBDAAC", "SEDAC", "LAADS", "ASDC"]
 
         self._search_var = tk.StringVar()
         self._daac_var = tk.StringVar(value="Any DAAC")
 
         if _HAS_CTK:
-            entry = ctk.CTkEntry(bar, textvariable=self._search_var, placeholder_text="Short name or keyword (e.g. ATL06)", width=340)
+            entry = ctk.CTkEntry(
+                bar, textvariable=self._search_var,
+                placeholder_text="Short name or keyword (e.g. ATL06)", width=340,
+            )
             entry.pack(side="left", padx=(0, 8))
-            self._daac_menu = ctk.CTkOptionMenu(bar, variable=self._daac_var, values=_DAACS, width=140)
+            self._daac_menu = ctk.CTkOptionMenu(
+                bar, variable=self._daac_var, values=_DAACS, width=140
+            )
             self._daac_menu.pack(side="left", padx=(0, 8))
-            self._search_btn = ctk.CTkButton(bar, text="Search", command=self._on_search, width=100)
+            self._search_btn = ctk.CTkButton(
+                bar, text="Search", command=self._on_search, width=100
+            )
             self._search_btn.pack(side="left")
         else:
             entry = tk.Entry(bar, textvariable=self._search_var, width=40)
@@ -58,20 +78,21 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         self._status_label = (
             ctk.CTkLabel(bar, text="", font=("Helvetica", 11))
-            if _HAS_CTK else
-            tk.Label(bar, text="")
+            if _HAS_CTK
+            else tk.Label(bar, text="")
         )
         self._status_label.pack(side="left", padx=(12, 0))
 
-        # ── results table ─────────────────────────────────────────────────────
         table_frame = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
         table_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         cols = ("short_name", "version", "concept_id", "provider")
-        self._tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="browse")
+        self._tree = ttk.Treeview(
+            table_frame, columns=cols, show="headings", selectmode="browse"
+        )
         headers = {
             "short_name": ("Short Name", 180),
-            "version":    ("Version",    60),
+            "version":    ("Version",     60),
             "concept_id": ("Concept ID", 250),
             "provider":   ("Provider",   140),
         }
@@ -88,43 +109,51 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         self._tree.bind("<Double-1>", lambda _: self._on_select())
         self._tree.bind("<Return>", lambda _: self._on_select())
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
 
-        # ── bottom bar ────────────────────────────────────────────────────────
         btm = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
         btm.pack(fill="x", padx=16, pady=(0, 16))
 
         if _HAS_CTK:
-            ctk.CTkButton(btm, text="← Back", command=self.app.show_home, width=140).pack(side="left")
-            self._select_btn = ctk.CTkButton(btm, text="Select Collection →", command=self._on_select, state="disabled", width=180)
+            ctk.CTkButton(
+                btm, text="← Back", command=self.app.show_home, width=140
+            ).pack(side="left")
+            self._select_btn = ctk.CTkButton(
+                btm, text="Select Collection →",
+                command=self._on_select, state="disabled", width=180,
+            )
             self._select_btn.pack(side="right")
         else:
             tk.Button(btm, text="← Back", command=self.app.show_home).pack(side="left")
-            self._select_btn = tk.Button(btm, text="Select →", command=self._on_select, state="disabled")
+            self._select_btn = tk.Button(
+                btm, text="Select →", command=self._on_select, state="disabled"
+            )
             self._select_btn.pack(side="right")
 
-        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+    # ── search ────────────────────────────────────────────────────────────────
 
     def _on_search(self):
         query = self._search_var.get().strip()
         if not query:
             return
+        self._search_btn.configure(state="disabled")
         if _HAS_CTK:
-            self._search_btn.configure(state="disabled")
-            self._status_label.configure(text="Searching...", text_color=theme.TEXT_STATUS)
+            self._status_label.configure(
+                text="Searching...", text_color=theme.TEXT_STATUS
+            )
         else:
-            self._search_btn.configure(state="disabled")
             self._status_label.configure(text="Searching...")
         for row in self._tree.get_children():
             self._tree.delete(row)
         daac = self._daac_var.get()
         daac = None if daac == "Any DAAC" else daac
-        threading.Thread(target=self._search_worker, args=(query, daac), daemon=True).start()
+        threading.Thread(
+            target=self._search_worker, args=(query, daac), daemon=True
+        ).start()
 
     def _search_worker(self, query: str, daac: str | None):
+        """Fetch matching collections from CMR; runs on a background thread."""
         try:
-            import earthaccess
-            from earthaccess.daac import find_provider
-
             base = {"has_granules": True, "count": 20}
 
             if daac:
@@ -132,7 +161,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 # so collections like EMIT (LPCLOUD) aren't missed when filtering LPDAAC.
                 on_prem = find_provider(daac, False)
                 cloud = find_provider(daac, True)
-                providers = list(dict.fromkeys([on_prem, cloud]))  # dedupe, preserve order
+                providers = list(dict.fromkeys([on_prem, cloud]))
 
                 seen: set[str] = set()
                 results = []
@@ -153,25 +182,29 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
             self.after(0, lambda: self._populate(results))
         except Exception as exc:
-            self.after(0, lambda msg=str(exc): self._set_status(f"Error: {msg}", error=True))
+            self.after(
+                0,
+                lambda msg=str(exc): self._set_status(f"Error: {msg}", error=True),
+            )
             self.after(0, lambda: self._search_btn.configure(state="normal"))
 
     def _populate(self, results):
         self._collections = results
         for row in self._tree.get_children():
             self._tree.delete(row)
-
         for col in results:
             umm = col.get("umm", {})
             meta = col.get("meta", {})
-            short_name = umm.get("ShortName", "")
-            version = umm.get("Version", "")
-            concept_id = meta.get("concept-id", "")
-            provider = meta.get("provider-id", "")
-            self._tree.insert("", "end", values=(short_name, version, concept_id, provider))
-
+            self._tree.insert("", "end", values=(
+                umm.get("ShortName", ""),
+                umm.get("Version", ""),
+                meta.get("concept-id", ""),
+                meta.get("provider-id", ""),
+            ))
         count = len(results)
-        self._set_status(f"{count} collection(s) found" if count else "No collections found")
+        self._set_status(
+            f"{count} collection(s) found" if count else "No collections found"
+        )
         self._search_btn.configure(state="normal")
 
     def _set_status(self, text, error=False):
@@ -182,8 +215,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._status_label.configure(text=text)
 
     def _on_tree_select(self, _event=None):
-        sel = self._tree.selection()
-        state = "normal" if sel else "disabled"
+        state = "normal" if self._tree.selection() else "disabled"
         self._select_btn.configure(state=state)
 
     def _on_select(self):

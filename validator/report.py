@@ -1,3 +1,5 @@
+"""CSV export and default file-path generation for validation reports."""
+
 import csv
 import datetime
 import json
@@ -8,9 +10,12 @@ from .runner import ValidationRun
 
 
 def export_csv(run: ValidationRun, output_path: Path) -> None:
+    """Write all granule check results from *run* to a CSV file at *output_path*."""
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["granule_ur", "concept_id", "check_name", "status", "message", "details"])
+        writer.writerow(
+            ["granule_ur", "concept_id", "check_name", "status", "message", "details"]
+        )
         for report in run.granule_reports:
             for check in report.checks:
                 writer.writerow([
@@ -23,7 +28,10 @@ def export_csv(run: ValidationRun, output_path: Path) -> None:
                 ])
 
 
-def default_report_path(collection_short_name: str, run: "ValidationRun | None" = None) -> Path:
+def default_report_path(
+    collection_short_name: str, run: "ValidationRun | None" = None
+) -> Path:
+    """Return a suggested Desktop path whose filename encodes the run summary."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d")
     if run is not None:
         n = len(run.granule_reports)

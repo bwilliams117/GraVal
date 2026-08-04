@@ -328,7 +328,7 @@ def check_daynight_consistency(granule) -> CheckResult:
         return CheckResult(name, Status.WARN, f"Sun position check inconclusive: {e}")
 
 
-def check_url_health(granule) -> CheckResult:
+def check_url_health(granule, session=None) -> CheckResult:
     """Check that download URLs exist, use HTTPS, have descriptions, and are reachable."""
     name = "URL Health"
     related = granule.get("umm", {}).get("RelatedUrls", [])
@@ -385,7 +385,8 @@ def check_url_health(granule) -> CheckResult:
             msg += f"; {len(quality_issues)} quality issue(s)"
         return CheckResult(name, status, msg, s3_details)
 
-    session = earthaccess.get_requests_https_session()
+    if session is None:
+        session = earthaccess.get_requests_https_session()
 
     def _probe(verify_ssl: bool) -> int:
         resp = session.head(url, timeout=8, allow_redirects=True, verify=verify_ssl)

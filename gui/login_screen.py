@@ -1,10 +1,12 @@
 """Login screen: split-pane layout with a form on the left and a cover image on the right."""
 
+import base64
 import os
 import threading
 import tkinter as tk
 
 import earthaccess
+import requests
 from PIL import Image as PilImage, ImageOps, ImageTk
 
 try:
@@ -97,7 +99,9 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             container, text="use your Earthdata login",
             font=("Helvetica", 13),
             bg=theme.SURFACE_0, fg=theme.TEXT_MUTED,
-        ).pack(pady=(0, 32))
+        ).pack(pady=(0, 20))
+
+        self._build_env_toggle(container)
 
         self._build_entry(container, "Username", "Earthdata username", show=None)
         self._build_entry(container, "Password", "Earthdata password", show="•")
@@ -127,19 +131,6 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         )
         self._btn.pack()
 
-        self._env_btn = _Button(
-            container, text="Sign in with .env",
-            command=self._on_env_login,
-            width=_ENTRY_W, height=40,
-            fg_color=theme.SURFACE_2,
-            hover_color=theme.BORDER_STRONG,
-            text_color=theme.TEXT_MUTED,
-            border_width=1,
-            border_color=theme.BORDER_STRONG,
-            font=("Helvetica", 12),
-        )
-        self._env_btn.pack(pady=(10, 0))
-
         footer = tk.Frame(left, bg=theme.SURFACE_0)
         footer.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 22))
 
@@ -167,15 +158,53 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             ).pack(anchor="center", pady=(0, 5))
             tk.Label(
                 footer,
-                text=(
-                    "Your credentials are never stored. Sign in manually above "
-                    "or use your .env file (EARTHDATA_USERNAME / EARTHDATA_PASSWORD)."
-                ),
+                text="Your credentials are never stored.",
                 font=("Helvetica", 9),
                 bg=theme.SURFACE_0, fg=theme.TEXT_DISABLED,
                 justify="center",
                 wraplength=_PANEL_WIDTH - 56,
             ).pack(anchor="center")
+
+    def _build_env_toggle(self, container):
+        """UAT / OPS environment selector shown above the credential fields."""
+        env_frame = (
+            ctk.CTkFrame(container, fg_color="transparent")
+            if _HAS_CTK
+            else tk.Frame(container, bg=theme.SURFACE_0)
+        )
+        env_frame.pack(pady=(0, 20))
+
+        self._env_var = tk.StringVar(value="UAT")
+
+        if _HAS_CTK:
+            ctk.CTkSegmentedButton(
+                env_frame,
+                values=["UAT", "OPS"],
+                variable=self._env_var,
+                width=160,
+                font=theme.FONT_BODY_BOLD,
+            ).pack()
+            ctk.CTkLabel(
+                env_frame,
+                text="Environment applies to all tools in this session.",
+                font=theme.FONT_TINY,
+                text_color=theme.TEXT_DISABLED,
+            ).pack(pady=(4, 0))
+        else:
+            btn_frame = tk.Frame(env_frame, bg=theme.SURFACE_0)
+            btn_frame.pack()
+            for val in ("UAT", "OPS"):
+                tk.Radiobutton(
+                    btn_frame, text=val, variable=self._env_var, value=val,
+                    bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY,
+                    selectcolor=theme.SURFACE_2,
+                ).pack(side="left", padx=8)
+            tk.Label(
+                env_frame,
+                text="Environment applies to all tools in this session.",
+                font=theme.FONT_CAPTION,
+                bg=theme.SURFACE_0, fg=theme.TEXT_DISABLED,
+            ).pack(pady=(4, 0))
 
     def _build_entry(self, container, label_text, placeholder, show):
         """Add a labelled text entry (username or password) to *container*."""
@@ -258,12 +287,8 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             return
         self._start_login(username, password)
 
-    def _on_env_login(self):
-        self._start_login(None, None)
-
     def _start_login(self, username, password):
         self._btn.configure(state="disabled")
-        self._env_btn.configure(state="disabled")
         if _HAS_CTK:
             self._progress.configure(mode="indeterminate")
         self._progress.start()
@@ -274,6 +299,97 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _login_worker(self, username, password):
         try:
+            env = self._env_var.get()
+
+            if env == "UAT":
+                # UAT URS is completely separate from OPS URS — earthaccess only
+                # knows about OPS, so we skip it entirely for UAT.  The Bearer
+                # token from uat.urs.earthdata.nasa.gov is sufficient for all
+                # UAT CMR operations.
+                if not username or not password:
+                    # .env path: pull credentials that were loaded at startup.
+                    username = os.environ.get("EARTHDATA_USERNAME", "")
+                    password = os.environ.get("EARTHDATA_PASSWORD", "")
+                    if not username or not password:
+                        self.after(
+                            0,
+                            lambda: self._on_failure(
+                                "No UAT credentials found — add "
+                                "EARTHDATA_USERNAME / EARTHDATA_PASSWORD to .env"
+                            ),
+                        )
+                        return
+
+                self.after(
+                    0,
+                    lambda: self._set_status(
+                        "Authenticating with UAT Earthdata Login..."
+                    ),
+                )
+                creds = base64.b64encode(
+                    f"{username}:{password}".encode()
+                ).decode()
+                auth_header = {"Authorization": f"Basic {creds}"}
+                _uat_base = "https://uat.urs.earthdata.nasa.gov"
+
+                # Retrieve existing tokens first — this endpoint only needs Basic
+                # auth and avoids the application-registration requirement that
+                # the POST /api/users/token endpoint enforces.
+                list_resp = requests.get(
+                    f"{_uat_base}/api/users/tokens",
+                    headers=auth_header,
+                    timeout=15,
+                )
+                uat_token = ""
+                if list_resp.status_code == 200:
+                    tokens = list_resp.json()
+                    if tokens:
+                        uat_token = (
+                            tokens[0].get("access_token")
+                            or tokens[0].get("token", {}).get("access_token")
+                            or ""
+                        )
+
+                if not uat_token:
+                    # No existing tokens — create one.
+                    create_resp = requests.post(
+                        f"{_uat_base}/api/users/token",
+                        headers=auth_header,
+                        timeout=15,
+                    )
+                    if create_resp.status_code not in (200, 201):
+                        self.after(
+                            0,
+                            lambda c=create_resp.status_code: self._on_failure(
+                                f"UAT login failed (HTTP {c}) — check your UAT "
+                                "credentials, or create a token at "
+                                "uat.urs.earthdata.nasa.gov/profile/personal_tokens"
+                            ),
+                        )
+                        return
+                    data = create_resp.json()
+                    uat_token = (
+                        data.get("access_token")
+                        or data.get("token", {}).get("access_token")
+                        or ""
+                    )
+
+                if not uat_token:
+                    self.after(
+                        0,
+                        lambda: self._on_failure(
+                            "UAT token response did not contain an access_token"
+                        ),
+                    )
+                    return
+
+                self.app.auth = None   # earthaccess auth not used in UAT sessions
+                self.app.env = env
+                self.app.uat_token = uat_token
+                self.after(0, self.app.show_home)
+                return
+
+            # ── OPS path ──────────────────────────────────────────────────────
             if username and password:
                 saved = {
                     k: os.environ.get(k)
@@ -292,16 +408,20 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             else:
                 auth = earthaccess.login(strategy="environment")
 
-            if auth.authenticated:
-                self.app.auth = auth
-                self.after(0, self.app.show_home)
-            else:
+            if not auth.authenticated:
                 self.after(
                     0,
                     lambda: self._on_failure(
                         "Authentication failed — check your credentials"
                     ),
                 )
+                return
+
+            self.app.auth = auth
+            self.app.env = env
+            self.app.uat_token = None
+            self.after(0, self.app.show_home)
+
         except Exception as exc:
             self.after(0, lambda msg=str(exc): self._on_failure(msg))
 
@@ -318,5 +438,4 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         if _HAS_CTK:
             self._progress.set(0)
         self._btn.configure(state="normal")
-        self._env_btn.configure(state="normal")
         self._set_status(f"Error: {message}", color=theme.STATUS_FAIL)

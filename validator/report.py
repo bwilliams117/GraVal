@@ -11,7 +11,7 @@ from .runner import ValidationRun
 
 def export_csv(run: ValidationRun, output_path: Path) -> None:
     """Write all granule check results from *run* to a CSV file at *output_path*."""
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(
             ["granule_ur", "concept_id", "check_name", "status", "message", "details"]

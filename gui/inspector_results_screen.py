@@ -1,8 +1,11 @@
-"""Results screen: progress view during validation, then a split-pane report view."""
+"""Inspector results screen: per-granule download progress, then a split-pane report."""
 
 import io
 import json
+import os
+import platform
 import queue
+import subprocess
 import threading
 import tkinter as tk
 import tkinter.ttk as ttk
@@ -10,7 +13,6 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog
 
-import earthaccess
 import requests
 import urllib3
 from PIL import Image, ImageTk
@@ -25,7 +27,7 @@ except ImportError:
 from . import theme
 from validator.checks import Status
 from validator.report import default_report_path, export_csv
-from validator.runner import ValidationRun, ValidationRunner
+from validator.deep_runner import DeepValidationRun, DeepValidationRunner
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -35,119 +37,249 @@ _STATUS_COLORS = {
     "FAIL": theme.STATUS_FAIL,
 }
 
+_ROW_STATUS_LABELS = {
+    "waiting":     "Waiting",
+    "starting":    "Starting...",
+    "downloading": "Downloading",
+    "inspecting":  "Inspecting...",
+    "done":        "Done",
+    "failed":      "Failed",
+}
 
-class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
-    """Runs a ValidationRunner in the background and renders the finished report."""
 
-    def __init__(self, parent, app, config: dict):
+def _fmt_bytes(n: int) -> str:
+    """Format a byte count as a human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.2f} GB"
+
+
+class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
+    """Downloads granules and runs checks; shows live progress then a report."""
+
+    def __init__(self, parent, app, check_config: dict):
         super().__init__(parent)
         self.app = app
-        self._config = config
-        self._runner = ValidationRunner()
-        self._run: ValidationRun | None = None
+        self._check_config = check_config
+        self._runner = DeepValidationRunner()
+        self._run: DeepValidationRun | None = None
         self._thumb_cache: dict[str, Image.Image] = {}
-        self._thumb_photo = None   # prevent GC on the displayed PhotoImage
-        self._build_running_view()
-        self._start_validation()
+        self._thumb_photo = None
+        self._granule_rows: list[dict] = []    # per-row widget references
+        self._build_progress_view()
+        self._start_inspection()
 
-    # ── running phase ─────────────────────────────────────────────────────────
+    # ── progress phase ────────────────────────────────────────────────────────
 
-    def _build_running_view(self):
-        self._running_frame = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
-        self._running_frame.place(relx=0.5, rely=0.5, anchor="center")
-
+    def _build_progress_view(self):
+        cfg = self._check_config
         col = self.app.selected_collection
         short_name = col.get("umm", {}).get("ShortName", "?") if col else "?"
+        max_granules = cfg.get("max_granules", 1)
+
+        self._progress_frame = (
+            ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
+        )
+        self._progress_frame.place(relx=0.5, rely=0.5, anchor="center")
 
         if _HAS_CTK:
             ctk.CTkLabel(
-                self._running_frame,
-                text=f"Validating: {short_name}",
-                font=("Helvetica", 18, "bold"),
+                self._progress_frame,
+                text=f"Inspecting: {short_name}",
+                font=theme.FONT_H3,
             ).pack(pady=(0, 16))
-            self._progress_bar = ctk.CTkProgressBar(self._running_frame, width=420)
-            self._progress_bar.set(0)
-            self._progress_bar.pack(pady=(0, 8))
-            self._progress_label = ctk.CTkLabel(
-                self._running_frame, text="Starting...", font=("Helvetica", 11)
-            )
-            self._progress_label.pack(pady=(0, 16))
-            ctk.CTkButton(
-                self._running_frame, text="Cancel",
-                command=self._cancel, width=100,
-                fg_color=theme.STATUS_FAIL, hover_color=theme.STATUS_FAIL_HVR,
-            ).pack()
         else:
             tk.Label(
-                self._running_frame,
-                text=f"Validating: {short_name}",
-                font=("Helvetica", 14, "bold"),
+                self._progress_frame,
+                text=f"Inspecting: {short_name}",
+                font=theme.FONT_H3,
             ).pack(pady=(0, 16))
-            self._progress_bar = ttk.Progressbar(
-                self._running_frame, length=420, mode="determinate"
-            )
-            self._progress_bar.pack(pady=(0, 8))
-            self._progress_label = tk.Label(
-                self._running_frame, text="Starting..."
-            )
-            self._progress_label.pack(pady=(0, 16))
-            tk.Button(
-                self._running_frame, text="Cancel", command=self._cancel
-            ).pack()
 
-    def _start_validation(self):
-        col = self.app.selected_collection
-        umm = col.get("umm", {}) if col else {}
-        self._runner.run_async(
-            short_name=umm.get("ShortName", ""),
-            sample_size=self._config["sample_size"],
-            temporal=self._config.get("temporal"),
-            enabled_checks=self._config["enabled_checks"],
-            entry_title=umm.get("EntryTitle", ""),
-            env=self._config.get("env", "OPS"),
-            uat_token=self._config.get("uat_token"),
-            concept_id=self._config.get("concept_id", ""),
+        # Per-granule rows.
+        rows_container = (
+            ctk.CTkFrame(self._progress_frame) if _HAS_CTK else tk.Frame(self._progress_frame)
         )
+        rows_container.pack(fill="x", padx=4, pady=(0, 16))
+
+        for i in range(max_granules):
+            row = self._build_granule_row(rows_container, i)
+            self._granule_rows.append(row)
+
+        # Overall progress bar.
+        if _HAS_CTK:
+            self._overall_bar = ctk.CTkProgressBar(self._progress_frame, width=480)
+            self._overall_bar.set(0)
+            self._overall_bar.pack(pady=(0, 6))
+            self._overall_label = ctk.CTkLabel(
+                self._progress_frame,
+                text="0 / 0 granules complete",
+                font=theme.FONT_SMALL,
+                text_color=theme.TEXT_MUTED,
+            )
+            self._overall_label.pack(pady=(0, 16))
+            self._cancel_btn = ctk.CTkButton(
+                self._progress_frame, text="Cancel",
+                command=self._cancel, width=100,
+                fg_color=theme.STATUS_FAIL, hover_color=theme.STATUS_FAIL_HVR,
+            )
+            self._cancel_btn.pack()
+        else:
+            self._overall_bar = ttk.Progressbar(
+                self._progress_frame, length=480, mode="determinate"
+            )
+            self._overall_bar.pack(pady=(0, 6))
+            self._overall_label = tk.Label(
+                self._progress_frame, text="0 / 0 granules complete"
+            )
+            self._overall_label.pack(pady=(0, 16))
+            self._cancel_btn = tk.Button(
+                self._progress_frame, text="Cancel", command=self._cancel
+            )
+            self._cancel_btn.pack()
+
+    def _build_granule_row(self, parent, idx: int) -> dict:
+        """Build one granule progress row and return widget references."""
+        row_frame = (
+            ctk.CTkFrame(parent, fg_color=theme.SURFACE_1)
+            if _HAS_CTK
+            else tk.Frame(parent, bg=theme.SURFACE_1, relief="flat", bd=1)
+        )
+        row_frame.pack(fill="x", padx=8, pady=4, ipady=4)
+
+        name_var = tk.StringVar(value=f"Granule {idx + 1}")
+        bytes_var = tk.StringVar(value="")
+        status_var = tk.StringVar(value="Waiting")
+
+        if _HAS_CTK:
+            ctk.CTkLabel(
+                row_frame, textvariable=name_var,
+                font=theme.FONT_SMALL, width=260, anchor="w",
+            ).pack(side="left", padx=(10, 6))
+
+            bar = ctk.CTkProgressBar(row_frame, width=180, height=8)
+            bar.set(0)
+            bar.pack(side="left", padx=(0, 6))
+
+            ctk.CTkLabel(
+                row_frame, textvariable=bytes_var,
+                font=theme.FONT_CAPTION, text_color=theme.TEXT_MUTED, width=100,
+            ).pack(side="left", padx=(0, 6))
+
+            ctk.CTkLabel(
+                row_frame, textvariable=status_var,
+                font=theme.FONT_CAPTION, text_color=theme.TEXT_MUTED, width=90,
+            ).pack(side="left", padx=(0, 10))
+        else:
+            tk.Label(row_frame, textvariable=name_var, width=32, anchor="w").pack(
+                side="left", padx=(8, 4)
+            )
+            bar = ttk.Progressbar(row_frame, length=180, mode="determinate")
+            bar.pack(side="left", padx=(0, 4))
+            tk.Label(row_frame, textvariable=bytes_var, width=14).pack(
+                side="left", padx=(0, 4)
+            )
+            tk.Label(row_frame, textvariable=status_var, width=12).pack(
+                side="left", padx=(0, 8)
+            )
+
+        return {
+            "name_var": name_var,
+            "bytes_var": bytes_var,
+            "status_var": status_var,
+            "bar": bar,
+            "_has_ctk": _HAS_CTK,
+        }
+
+    def _update_row_progress(
+        self, idx: int, granule_ur: str,
+        bytes_so_far: int, total_bytes: int, state: str,
+    ):
+        if idx >= len(self._granule_rows):
+            return
+        row = self._granule_rows[idx]
+
+        short_ur = granule_ur[:42] + "…" if len(granule_ur) > 42 else granule_ur
+        row["name_var"].set(short_ur)
+        row["status_var"].set(_ROW_STATUS_LABELS.get(state, state))
+
+        if state == "downloading" and total_bytes > 0:
+            pct = bytes_so_far / total_bytes
+            row["bytes_var"].set(f"{_fmt_bytes(bytes_so_far)} / {_fmt_bytes(total_bytes)}")
+        elif state == "downloading":
+            pct = 0
+            row["bytes_var"].set(_fmt_bytes(bytes_so_far))
+        elif state == "done":
+            pct = 1.0
+            row["bytes_var"].set("")
+        else:
+            pct = 0
+            row["bytes_var"].set("")
+
+        if row["_has_ctk"]:
+            row["bar"].set(pct)
+        else:
+            row["bar"]["value"] = pct * 100
+
+    # ── runner lifecycle ──────────────────────────────────────────────────────
+
+    def _start_inspection(self):
+        self._runner.run_async(self._check_config)
         self._poll()
 
     def _poll(self):
-        """Drain the result queue; reschedule itself every 100ms until done."""
+        """Drain the runner queue every 100ms until the run completes."""
         q = self._runner.result_queue
+        max_granules = self._check_config.get("max_granules", 1)
         try:
             while True:
-                msg_type, payload = q.get_nowait()
+                item = q.get_nowait()
+                msg_type = item[0]
+                payload = item[1] if len(item) > 1 else None
+
                 if msg_type == "progress":
                     current, total, message = payload
                     pct = current / total if total > 0 else 0
                     if _HAS_CTK:
-                        self._progress_bar.set(pct)
+                        self._overall_bar.set(pct)
                     else:
-                        self._progress_bar["value"] = pct * 100
-                    self._progress_label.configure(
-                        text=f"{message}  ({current}/{total})"
+                        self._overall_bar["value"] = pct * 100
+                    self._overall_label.configure(
+                        text=f"{current} / {total}  — {message}"
                     )
+
+                elif msg_type == "download_progress":
+                    idx, granule_ur, bytes_so_far, total_bytes, state = payload
+                    self._update_row_progress(
+                        idx, granule_ur, bytes_so_far, total_bytes, state
+                    )
+
                 elif msg_type == "done":
                     self._on_done(payload)
                     return
+
                 elif msg_type == "error":
                     self._on_error(payload)
                     return
+
                 elif msg_type == "cancelled":
                     self._on_cancelled()
                     return
+
         except queue.Empty:
             pass
         self.after(100, self._poll)
 
     def _cancel(self):
         self._runner.cancel()
-        self.app.show_config()
 
     def _on_cancelled(self):
-        self.app.show_config()
+        self.app.show_inspector_config()
 
     def _on_error(self, message: str):
-        # earthaccess sometimes surfaces raw CMR JSON error bodies — unwrap them.
         try:
             parsed = json.loads(message)
             errors = parsed.get("errors") or parsed.get("error")
@@ -156,42 +288,50 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         except Exception:
             pass
         if _HAS_CTK:
-            self._progress_label.configure(
+            self._overall_label.configure(
                 text=f"Error: {message}", text_color=theme.STATUS_FAIL
             )
         else:
-            self._progress_label.configure(text=f"Error: {message}")
+            self._overall_label.configure(text=f"Error: {message}")
 
     # ── results phase ─────────────────────────────────────────────────────────
 
-    def _on_done(self, run: ValidationRun):
+    def _on_done(self, run: DeepValidationRun):
         self._run = run
-        self.app.last_validation_run = run
-        self._running_frame.place_forget()
+        self._progress_frame.place_forget()
         self._build_results_view(run)
         theme.place_env_badge(self, getattr(self.app, "env", "OPS"))
 
-    def _build_results_view(self, run: ValidationRun):
+    def _build_results_view(self, run: DeepValidationRun):
         theme.setup_ttk_style()
 
         summary_frame = (
-            ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK
-            else tk.Frame(self)
+            ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
         )
         summary_frame.pack(fill="x", padx=16, pady=(16, 8))
 
         summary_text = (
-            f"{len(run.granule_reports)} granule(s) checked  ·  "
+            f"{len(run.granule_reports)} granule(s) inspected  ·  "
             f"PASS: {run.pass_count}  ·  WARN: {run.warn_count}  ·  FAIL: {run.fail_count}"
         )
         if _HAS_CTK:
             ctk.CTkLabel(
-                summary_frame, text=summary_text, font=("Helvetica", 14, "bold")
+                summary_frame, text=summary_text, font=theme.FONT_H4,
             ).pack(side="left", padx=8)
         else:
             tk.Label(
-                summary_frame, text=summary_text, font=("Helvetica", 11, "bold")
+                summary_frame, text=summary_text, font=theme.FONT_H4,
             ).pack(side="left")
+
+        if run.errors:
+            err_text = "Errors: " + "; ".join(run.errors)
+            if _HAS_CTK:
+                ctk.CTkLabel(
+                    summary_frame, text=err_text, font=theme.FONT_SMALL,
+                    text_color=theme.STATUS_FAIL,
+                ).pack(side="left", padx=16)
+            else:
+                tk.Label(summary_frame, text=err_text).pack(side="left", padx=8)
 
         paned = tk.PanedWindow(
             self, orient="horizontal", sashwidth=6,
@@ -252,10 +392,11 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         )
         self._thumb_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Place the sash after layout has settled (~40% of available height).
         right_paned.after(
             100,
-            lambda: right_paned.sash_place(0, 0, int(right_paned.winfo_height() * 0.4)),
+            lambda: right_paned.sash_place(
+                0, 0, int(right_paned.winfo_height() * 0.35)
+            ),
         )
 
         text_frame = tk.Frame(right_paned, bg=theme.SURFACE_0)
@@ -284,17 +425,18 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(
-                btm, text="← New Validation",
-                command=self.app.show_config, width=160,
+                btm, text="← New Inspection",
+                command=self.app.show_inspector_config, width=160,
             ).pack(side="left")
             ctk.CTkButton(
                 btm, text="Export CSV",
                 command=self._export_csv, width=120,
             ).pack(side="right")
         else:
-            tk.Button(btm, text="← New Validation", command=self.app.show_config).pack(
-                side="left"
-            )
+            tk.Button(
+                btm, text="← New Inspection",
+                command=self.app.show_inspector_config,
+            ).pack(side="left")
             tk.Button(btm, text="Export CSV", command=self._export_csv).pack(
                 side="right"
             )
@@ -316,7 +458,6 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._show_detail(self._run.granule_reports[idx])
 
     def _load_thumbnail(self, report):
-        """Fetch and display the browse image for *report*, using a per-URL cache."""
         self._thumb_label.configure(image="", text="Loading preview...")
         self._thumb_photo = None
 
@@ -330,14 +471,10 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         def _fetch():
             try:
-                session = (
-                    self._runner.http_session
-                    or earthaccess.get_requests_https_session()
-                )
                 try:
-                    resp = session.get(report.browse_url, timeout=15, stream=True)
+                    resp = requests.get(report.browse_url, timeout=15, stream=True)
                 except requests.exceptions.SSLError:
-                    resp = session.get(
+                    resp = requests.get(
                         report.browse_url, timeout=15, stream=True, verify=False
                     )
                 resp.raise_for_status()
@@ -348,9 +485,7 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             except Exception:
                 self.after(
                     0,
-                    lambda: self._thumb_label.configure(
-                        image="", text="Preview unavailable"
-                    ),
+                    lambda: self._thumb_label.configure(image="", text="Preview unavailable"),
                 )
 
         threading.Thread(target=_fetch, daemon=True).start()
@@ -367,10 +502,6 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _show_detail(self, report):
         """Populate the text pane with check results for the selected granule."""
         self._load_thumbnail(report)
-        url = (
-            f"https://search.earthdata.nasa.gov/search/granules"
-            f"?p={report.concept_id}"
-        )
 
         if _HAS_CTK:
             self._detail_text.configure(state="normal")
@@ -386,18 +517,48 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         textbox.insert("end", f"Granule: {report.granule_ur}\n")
         textbox.insert("end", f"Concept ID: {report.concept_id}\n")
-        textbox.insert("end", "View in Earthdata Search", "link")
-        textbox.insert("end", "\n")
 
-        textbox.tag_bind("link", "<Button-1>", lambda _e, u=url: self._open_url(u))
-        textbox.tag_bind("link", "<Enter>", lambda _e: [
-            textbox.tag_configure("link", foreground=theme.LINK_HOVER),
-            textbox.config(cursor="hand2"),
-        ])
-        textbox.tag_bind("link", "<Leave>", lambda _e: [
-            textbox.tag_configure("link", foreground=theme.LINK),
-            textbox.config(cursor=""),
-        ])
+        # Earthdata Search link (OPS only; concept IDs differ in UAT).
+        env = self._check_config.get("env", "OPS")
+        if env == "OPS":
+            eds_url = (
+                f"https://search.earthdata.nasa.gov/search/granules"
+                f"?p={report.concept_id}"
+            )
+            textbox.insert("end", "View in Earthdata Search", "link")
+            textbox.insert("end", "\n")
+            textbox.tag_bind(
+                "link", "<Button-1>",
+                lambda _e, u=eds_url: webbrowser.open(u),
+            )
+            textbox.tag_bind("link", "<Enter>", lambda _e: [
+                textbox.tag_configure("link", foreground=theme.LINK_HOVER),
+                textbox.config(cursor="hand2"),
+            ])
+            textbox.tag_bind("link", "<Leave>", lambda _e: [
+                textbox.tag_configure("link", foreground=theme.LINK),
+                textbox.config(cursor=""),
+            ])
+
+        # Local download folder link.
+        if report.local_folder and report.local_folder.exists():
+            folder_path = str(report.local_folder)
+            tag = "folder_link"
+            textbox.tag_configure(tag, foreground=theme.LINK, underline=True)
+            textbox.insert("end", "Open download folder", tag)
+            textbox.insert("end", f"\n  {folder_path}\n")
+            textbox.tag_bind(
+                tag, "<Button-1>",
+                lambda _e, p=report.local_folder: self._open_folder(p),
+            )
+            textbox.tag_bind(tag, "<Enter>", lambda _e: [
+                textbox.tag_configure(tag, foreground=theme.LINK_HOVER),
+                textbox.config(cursor="hand2"),
+            ])
+            textbox.tag_bind(tag, "<Leave>", lambda _e: [
+                textbox.tag_configure(tag, foreground=theme.LINK),
+                textbox.config(cursor=""),
+            ])
 
         textbox.insert("end", "\n")
 
@@ -407,7 +568,6 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         _uid = [0]
 
         def _make_toggle(tb, tag_closed, tag_open, tag_items):
-            """Return a click handler that toggles a collapsible list section."""
             is_open = [False]
 
             def _toggle(_e):
@@ -478,8 +638,20 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         self._detail_text.configure(state="disabled")
 
-    def _open_url(self, url: str):
-        webbrowser.open(url)
+    def _open_folder(self, path: Path):
+        """Open *path* in the OS file manager."""
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                subprocess.Popen(["open", str(path)])
+            elif system == "Windows":
+                os.startfile(str(path))  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception:
+            pass
+
+    # ── export ────────────────────────────────────────────────────────────────
 
     def _export_csv(self):
         if not self._run:

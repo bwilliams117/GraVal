@@ -26,6 +26,11 @@ from .checks import (
 )
 
 
+_CMR_HOST = {
+    "OPS": "cmr.earthdata.nasa.gov",
+    "UAT": "cmr.uat.earthdata.nasa.gov",
+}
+
 # Registry of check_id → (display_label, function).
 # Per-granule checks receive (granule,); collection_reference receives
 # (granule, short_name, entry_title).  None marks a whole-sample check
@@ -97,6 +102,7 @@ class ValidationRunner:
         self._queue: queue.Queue = queue.Queue()
         self._cancelled = threading.Event()
         self._thread: threading.Thread | None = None
+        self.http_session: _requests.Session | None = None
 
     @property
     def result_queue(self) -> queue.Queue:
@@ -109,6 +115,9 @@ class ValidationRunner:
         temporal: tuple[str, str] | None,
         enabled_checks: set[str],
         entry_title: str = "",
+        env: str = "OPS",
+        uat_token: str | None = None,
+        concept_id: str = "",
     ) -> None:
         """Start a new validation run, replacing any previous state."""
         self._cancelled.clear()
@@ -119,7 +128,11 @@ class ValidationRunner:
                 break
         self._thread = threading.Thread(
             target=self._worker,
-            args=(short_name, sample_size, temporal, enabled_checks, entry_title),
+            args=(
+                short_name, sample_size, temporal,
+                enabled_checks, entry_title,
+                env, uat_token, concept_id,
+            ),
             daemon=True,
         )
         self._thread.start()
@@ -131,17 +144,55 @@ class ValidationRunner:
     def _put(self, msg_type: str, payload):
         self._queue.put((msg_type, payload))
 
-    def _worker(self, short_name, sample_size, temporal, enabled_checks, entry_title=""):
+    def _worker(
+        self, short_name, sample_size, temporal, enabled_checks,
+        entry_title="", env="OPS", uat_token=None, concept_id="",
+    ):
         run = ValidationRun(collection_short_name=short_name, sample_size=sample_size)
 
         try:
             self._put("progress", (0, 1, f"Searching for granules in {short_name}..."))
 
-            query = earthaccess.DataGranules().short_name(short_name)
-            if temporal and temporal[0]:
-                query = query.temporal(*temporal)
+            host = _CMR_HOST.get(env, _CMR_HOST["OPS"])
+            granule_url = f"https://{host}/search/granules.umm_json"
 
-            total_count = query.hits()
+            # Build the base CMR search params.
+            # Pin to the exact collection concept_id when available — this is the
+            # only reliable way to stay within the selected collection across both
+            # OPS and UAT, because short_name alone can match collections in the
+            # other environment.
+            base_params: dict = {"page_size": 1}
+            if concept_id:
+                base_params["collection_concept_id"] = concept_id
+            else:
+                base_params["short_name"] = short_name
+            if temporal and temporal[0]:
+                base_params["temporal[]"] = f"{temporal[0]},{temporal[1] or ''}"
+
+            # UAT requires a Bearer token; OPS uses the earthaccess session
+            # which handles its own auth internally.
+            if env == "UAT":
+                session = _requests.Session()
+                if uat_token:
+                    session.headers["Authorization"] = f"Bearer {uat_token}"
+                hit_resp = session.get(
+                    granule_url, params={**base_params, "page_size": 1},
+                    timeout=20,
+                )
+                hit_resp.raise_for_status()
+                total_count = int(hit_resp.headers.get("CMR-Hits", 0))
+            else:
+                # For OPS use the authenticated earthaccess session so it can
+                # reach protected collections.
+                session = earthaccess.get_requests_https_session()
+                hit_resp = session.get(
+                    granule_url,
+                    params={**base_params, "page_size": 1},
+                )
+                hit_resp.raise_for_status()
+                total_count = int(hit_resp.headers.get("CMR-Hits", 0))
+
+            self.http_session = session
 
             if total_count == 0:
                 run.errors.append(f"No granules found for collection '{short_name}'")
@@ -153,28 +204,24 @@ class ValidationRunner:
                 return
 
             max_page = min(total_count, _CMR_MAX_DEPTH)
-            session = earthaccess.get_requests_https_session()
-
-            base_params = {"short_name": short_name, "page_size": 1}
-            if temporal and temporal[0]:
-                base_params["temporal[]"] = f"{temporal[0]},{temporal[1] or ''}"
 
             need = min(sample_size, total_count)
+            # Pre-select unique page offsets so we never fetch the same CMR
+            # offset twice — sampling without replacement at the page level.
+            pages = random.sample(range(1, max_page + 1), need)
             sample = []
 
-            for i in range(need):
+            for i, page_num in enumerate(pages):
                 if self._cancelled.is_set():
                     self._put("cancelled", None)
                     return
 
                 self._put("progress", (i, need, f"Sampling granules ({i}/{need})..."))
 
-                # Each granule is fetched from an independently chosen random page
-                # so picks are spread across the full collection history.
-                page_num = random.randint(1, max_page)
                 resp = session.get(
-                    "https://cmr.earthdata.nasa.gov/search/granules.umm_json",
+                    granule_url,
                     params={**base_params, "page_num": page_num},
+                    timeout=20,
                 )
                 resp.raise_for_status()
                 items = resp.json().get("items", [])
@@ -217,7 +264,7 @@ class ValidationRunner:
                     (
                         u["URL"] for u in related
                         if u.get("Type") == "GET RELATED VISUALIZATION"
-                        and u.get("URL", "").startswith("https://")
+                        and u.get("URL", "").startswith("http")
                     ),
                     None,
                 )
@@ -233,6 +280,8 @@ class ValidationRunner:
                     try:
                         if check_id == "collection":
                             result = fn(granule, short_name, entry_title)
+                        elif check_id == "url_health":
+                            result = fn(granule, session)
                         else:
                             result = fn(granule)
                     except Exception as exc:

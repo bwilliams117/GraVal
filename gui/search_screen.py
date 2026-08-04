@@ -5,6 +5,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 
 import earthaccess
+import requests
 from earthaccess.daac import find_provider
 
 try:
@@ -154,32 +155,10 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _search_worker(self, query: str, daac: str | None):
         """Fetch matching collections from CMR; runs on a background thread."""
         try:
-            base = {"has_granules": True, "count": 20}
-
-            if daac:
-                # Each DAAC has separate on-prem and cloud providers — search both
-                # so collections like EMIT (LPCLOUD) aren't missed when filtering LPDAAC.
-                on_prem = find_provider(daac, False)
-                cloud = find_provider(daac, True)
-                providers = list(dict.fromkeys([on_prem, cloud]))
-
-                seen: set[str] = set()
-                results = []
-                for provider in providers:
-                    kw = {**base, "provider": provider}
-                    batch = earthaccess.search_datasets(short_name=query, **kw)
-                    if not batch:
-                        batch = earthaccess.search_datasets(keyword=query, **kw)
-                    for col in batch:
-                        cid = col.get("meta", {}).get("concept-id", "")
-                        if cid not in seen:
-                            seen.add(cid)
-                            results.append(col)
+            if getattr(self.app, "env", "OPS") == "UAT":
+                results = self._search_uat(query, daac)
             else:
-                results = earthaccess.search_datasets(short_name=query, **base)
-                if not results:
-                    results = earthaccess.search_datasets(keyword=query, **base)
-
+                results = self._search_ops(query, daac)
             self.after(0, lambda: self._populate(results))
         except Exception as exc:
             self.after(
@@ -187,6 +166,57 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 lambda msg=str(exc): self._set_status(f"Error: {msg}", error=True),
             )
             self.after(0, lambda: self._search_btn.configure(state="normal"))
+
+    def _search_ops(self, query: str, daac: str | None) -> list:
+        """Search OPS CMR using earthaccess."""
+        base = {"has_granules": True, "count": 20}
+        if daac:
+            # Each DAAC has separate on-prem and cloud providers — search both
+            # so collections like EMIT (LPCLOUD) aren't missed when filtering LPDAAC.
+            on_prem = find_provider(daac, False)
+            cloud = find_provider(daac, True)
+            providers = list(dict.fromkeys([on_prem, cloud]))
+            seen: set[str] = set()
+            results = []
+            for provider in providers:
+                kw = {**base, "provider": provider}
+                batch = earthaccess.search_datasets(short_name=query, **kw)
+                if not batch:
+                    batch = earthaccess.search_datasets(keyword=query, **kw)
+                for col in batch:
+                    cid = col.get("meta", {}).get("concept-id", "")
+                    if cid not in seen:
+                        seen.add(cid)
+                        results.append(col)
+            return results
+        results = earthaccess.search_datasets(short_name=query, **base)
+        if not results:
+            results = earthaccess.search_datasets(keyword=query, **base)
+        return results
+
+    def _search_uat(self, query: str, daac: str | None) -> list:
+        """Search UAT CMR directly via requests (earthaccess does not support UAT)."""
+        token = getattr(self.app, "uat_token", None) or ""
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        base_url = "https://cmr.uat.earthdata.nasa.gov/search/collections.umm_json"
+        params = {"has_granules": "true", "page_size": 20}
+
+        if daac:
+            params["provider"] = daac
+
+        # Try short_name first, then fall back to keyword search.
+        for search_mode in ("short_name", "keyword"):
+            p = {**params, search_mode: query}
+            resp = requests.get(base_url, params=p, headers=headers, timeout=20)
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+            if items:
+                # Normalise to the same dict shape earthaccess returns.
+                return [
+                    {"umm": item.get("umm", {}), "meta": item.get("meta", {})}
+                    for item in items
+                ]
+        return []
 
     def _populate(self, results):
         self._collections = results
@@ -225,4 +255,8 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         idx = self._tree.index(sel[0])
         if idx < len(self._collections):
             self.app.selected_collection = self._collections[idx]
-            self.app.show_config()
+            if getattr(self.app, "_inspector_entry", False):
+                self.app._inspector_entry = False
+                self.app.show_inspector_config()
+            else:
+                self.app.show_config()

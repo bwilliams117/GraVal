@@ -50,6 +50,13 @@ _TOOLS = [
         "schema, spatial, temporal, and URL health checks against the UMM metadata.",
         "show_search",
     ),
+    (
+        "Granule Inspector",
+        "Pre-ingest, file-level validation for LP DAAC curators. Downloads science "
+        "files and inspects internal structure (HDF5, COG, HDF4, NetCDF) in addition "
+        "to full UMM metadata checks.",
+        "show_inspector_search",
+    ),
 ]
 
 
@@ -139,6 +146,9 @@ class HomeScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _on_signout(self):
         self.app.auth = None
+        self.app.uat_token = None
+        self.app.env = "UAT"
         self.app.selected_collection = None
         self.app.last_validation_run = None
+        self.app._inspector_entry = False
         self.app.show_login()

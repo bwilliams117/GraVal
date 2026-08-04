@@ -9,3 +9,7 @@ customtkinter
 astral
 requests
 Pillow
+h5py
+rasterio
+netCDF4
+pyhdf

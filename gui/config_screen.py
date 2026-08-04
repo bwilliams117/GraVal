@@ -210,8 +210,12 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         start = self._start_var.get().strip() or None
         end = self._end_var.get().strip() or None
         temporal = (start, end) if start or end else None
+        col = self.app.selected_collection
         self.app.show_results({
             "sample_size": int(self._sample_var.get()),
             "temporal": temporal,
             "enabled_checks": enabled,
+            "env": getattr(self.app, "env", "OPS"),
+            "uat_token": getattr(self.app, "uat_token", None),
+            "concept_id": col.get("meta", {}).get("concept-id", "") if col else "",
         })

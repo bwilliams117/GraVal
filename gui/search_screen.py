@@ -133,7 +133,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(
-                btm, text="Back", command=self.app.show_home, width=140
+                btm, text="← Back", command=self.app.show_home, width=140
             ).pack(side="left")
             self._select_btn = ctk.CTkButton(
                 btm, text="Select Collection",
@@ -141,7 +141,7 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             )
             self._select_btn.pack(side="right")
         else:
-            tk.Button(btm, text="Back", command=self.app.show_home).pack(side="left")
+            tk.Button(btm, text="← Back", command=self.app.show_home).pack(side="left")
             self._select_btn = tk.Button(
                 btm, text="Select", command=self._on_select, state="disabled"
             )

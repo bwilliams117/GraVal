@@ -333,7 +333,7 @@ class InspectorConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(
-                btm, text="Back to Search",
+                btm, text="← Back to Search",
                 command=self.app.show_inspector_search, width=140,
             ).pack(side="left")
             ctk.CTkButton(
@@ -347,7 +347,7 @@ class InspectorConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             ).pack(side="right")
         else:
             tk.Button(
-                btm, text="Back to Search",
+                btm, text="← Back to Search",
                 command=self.app.show_inspector_search,
             ).pack(side="left")
             tk.Button(btm, text="Home", command=self.app.show_home).pack(

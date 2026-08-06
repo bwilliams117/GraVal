@@ -222,7 +222,7 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(
-                btm, text="Back to Search",
+                btm, text="← Back to Search",
                 command=self.app.show_search, width=140,
             ).pack(side="left")
             ctk.CTkButton(
@@ -235,7 +235,7 @@ class ConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 fg_color=theme.STATUS_PASS, hover_color=theme.STATUS_PASS_HVR,
             ).pack(side="right")
         else:
-            tk.Button(btm, text="Back to Search",
+            tk.Button(btm, text="← Back to Search",
                       command=self.app.show_search).pack(side="left")
             tk.Button(btm, text="Home", command=self.app.show_home).pack(
                 side="left", padx=(6, 0)

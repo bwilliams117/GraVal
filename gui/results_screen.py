@@ -35,6 +35,8 @@ _STATUS_COLORS = {
     "FAIL": theme.STATUS_FAIL,
 }
 
+_STATUS_SYMBOLS = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}
+
 
 class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     """Runs a ValidationRunner in the background and renders the finished report."""
@@ -53,46 +55,69 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     # ── running phase ─────────────────────────────────────────────────────────
 
     def _build_running_view(self):
-        self._running_frame = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
+        self._running_frame = (
+            ctk.CTkFrame(self, fg_color=theme.SURFACE_1, corner_radius=12)
+            if _HAS_CTK else tk.Frame(self, bg=theme.SURFACE_1)
+        )
         self._running_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        inner = (
+            ctk.CTkFrame(self._running_frame, fg_color="transparent")
+            if _HAS_CTK else tk.Frame(self._running_frame, bg=theme.SURFACE_1)
+        )
+        inner.pack(padx=40, pady=28)
 
         col = self.app.selected_collection
         short_name = col.get("umm", {}).get("ShortName", "?") if col else "?"
 
         if _HAS_CTK:
             ctk.CTkLabel(
-                self._running_frame,
+                inner,
                 text=f"Validating: {short_name}",
-                font=("Helvetica", 18, "bold"),
-            ).pack(pady=(0, 16))
-            self._progress_bar = ctk.CTkProgressBar(self._running_frame, width=420)
+                font=theme.FONT_H3,
+            ).pack(pady=(0, 4))
+            ctk.CTkLabel(
+                inner,
+                text="Running metadata checks…",
+                font=theme.FONT_SMALL,
+                text_color=theme.TEXT_MUTED,
+            ).pack(pady=(0, 20))
+            self._progress_bar = ctk.CTkProgressBar(inner, width=420)
             self._progress_bar.set(0)
             self._progress_bar.pack(pady=(0, 8))
             self._progress_label = ctk.CTkLabel(
-                self._running_frame, text="Starting...", font=("Helvetica", 11)
+                inner, text="Starting...", font=theme.FONT_SMALL,
+                text_color=theme.TEXT_MUTED,
             )
-            self._progress_label.pack(pady=(0, 16))
+            self._progress_label.pack(pady=(0, 20))
             ctk.CTkButton(
-                self._running_frame, text="Cancel",
+                inner, text="Cancel",
                 command=self._cancel, width=100,
                 fg_color=theme.STATUS_FAIL, hover_color=theme.STATUS_FAIL_HVR,
             ).pack()
         else:
             tk.Label(
-                self._running_frame,
+                inner,
                 text=f"Validating: {short_name}",
                 font=("Helvetica", 14, "bold"),
+                bg=theme.SURFACE_1, fg=theme.TEXT_PRIMARY,
+            ).pack(pady=(0, 4))
+            tk.Label(
+                inner, text="Running metadata checks…",
+                font=("Helvetica", 10),
+                bg=theme.SURFACE_1, fg=theme.TEXT_MUTED,
             ).pack(pady=(0, 16))
             self._progress_bar = ttk.Progressbar(
-                self._running_frame, length=420, mode="determinate"
+                inner, length=420, mode="determinate"
             )
             self._progress_bar.pack(pady=(0, 8))
             self._progress_label = tk.Label(
-                self._running_frame, text="Starting..."
+                inner, text="Starting...",
+                bg=theme.SURFACE_1, fg=theme.TEXT_MUTED,
             )
-            self._progress_label.pack(pady=(0, 16))
+            self._progress_label.pack(pady=(0, 20))
             tk.Button(
-                self._running_frame, text="Cancel", command=self._cancel
+                inner, text="Cancel", command=self._cancel
             ).pack()
 
     def _start_validation(self):
@@ -180,18 +205,41 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         )
         summary_frame.pack(fill="x", padx=16, pady=(16, 8))
 
-        summary_text = (
-            f"{len(run.granule_reports)} granule(s) checked  ·  "
-            f"PASS: {run.pass_count}  ·  WARN: {run.warn_count}  ·  FAIL: {run.fail_count}"
-        )
         if _HAS_CTK:
             ctk.CTkLabel(
-                summary_frame, text=summary_text, font=("Helvetica", 14, "bold")
-            ).pack(side="left", padx=8)
+                summary_frame,
+                text=f"{len(run.granule_reports)} granule(s) checked",
+                font=theme.FONT_H4,
+            ).pack(side="left", padx=(8, 16))
+            for symbol, count, color in [
+                ("✓", run.pass_count, theme.STATUS_PASS),
+                ("!", run.warn_count, theme.STATUS_WARN),
+                ("✗", run.fail_count, theme.STATUS_FAIL),
+            ]:
+                ctk.CTkLabel(
+                    summary_frame,
+                    text=f"  {symbol}  {count}  ",
+                    font=theme.FONT_BODY_BOLD,
+                    text_color=color,
+                    fg_color=theme.SURFACE_2,
+                    corner_radius=6,
+                ).pack(side="left", padx=(0, 6), ipady=2)
         else:
             tk.Label(
-                summary_frame, text=summary_text, font=("Helvetica", 11, "bold")
-            ).pack(side="left")
+                summary_frame,
+                text=f"{len(run.granule_reports)} granule(s) checked",
+                font=("Helvetica", 11, "bold"),
+            ).pack(side="left", padx=(0, 16))
+            for symbol, count, color in [
+                ("✓", run.pass_count, theme.STATUS_PASS),
+                ("!", run.warn_count, theme.STATUS_WARN),
+                ("✗", run.fail_count, theme.STATUS_FAIL),
+            ]:
+                tk.Label(
+                    summary_frame,
+                    text=f"  {symbol}  {count}  ",
+                    bg=theme.SURFACE_2, fg=color,
+                ).pack(side="left", padx=(0, 6), ipadx=8, ipady=2)
 
         paned = tk.PanedWindow(
             self, orient="horizontal", sashwidth=6,
@@ -206,12 +254,15 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._tree = ttk.Treeview(
             left, columns=cols, show="headings", selectmode="browse"
         )
-        self._tree.heading("status", text="Status")
+        self._tree.heading("status", text="")
         self._tree.heading("granule_ur", text="Granule UR")
         self._tree.heading("checks", text="Checks")
-        self._tree.column("status", width=60, minwidth=50, stretch=False)
+        self._tree.column("status", width=44, minwidth=36, stretch=False)
         self._tree.column("granule_ur", width=260, minwidth=100)
         self._tree.column("checks", width=80, minwidth=60, stretch=False)
+
+        self._tree.tag_configure("row_WARN", foreground=theme.STATUS_WARN)
+        self._tree.tag_configure("row_FAIL", foreground=theme.STATUS_FAIL)
 
         vsb = ttk.Scrollbar(left, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -223,11 +274,13 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         for report in run.granule_reports:
             total = len(report.checks)
             passed = sum(1 for c in report.checks if c.status == Status.PASS)
+            status = report.overall_status.value
+            tag = () if status == "PASS" else (f"row_{status}",)
             self._tree.insert("", "end", values=(
-                report.overall_status.value,
+                _STATUS_SYMBOLS.get(status, status),
                 report.granule_ur,
                 f"{passed}/{total}",
-            ))
+            ), tags=tag)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_granule_select)
 
@@ -263,14 +316,14 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             self._detail_text = ctk.CTkTextbox(
-                text_frame, font=("Courier", 11), wrap="word"
+                text_frame, font=theme.FONT_SMALL, wrap="word"
             )
             self._detail_text.pack(fill="both", expand=True)
             self._detail_text.insert("end", "Select a granule to see check details.")
             self._detail_text.configure(state="disabled")
         else:
             self._detail_text = tk.Text(
-                text_frame, font=("Courier", 10), wrap="word", state="disabled"
+                text_frame, font=theme.FONT_SMALL, wrap="word", state="disabled"
             )
             vsb2 = ttk.Scrollbar(
                 text_frame, orient="vertical", command=self._detail_text.yview
@@ -278,6 +331,8 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._detail_text.configure(yscrollcommand=vsb2.set)
             self._detail_text.pack(side="left", fill="both", expand=True)
             vsb2.pack(side="right", fill="y")
+
+        tk.Frame(self, height=1, bg=theme.BORDER_SUBTLE).pack(fill="x", padx=16)
 
         btm = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
         btm.pack(fill="x", padx=16, pady=(0, 16))
@@ -292,9 +347,9 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 command=self._export_csv, width=120,
             ).pack(side="right")
         else:
-            tk.Button(btm, text="← New Validation", command=self.app.show_config).pack(
-                side="left"
-            )
+            tk.Button(
+                btm, text="← New Validation", command=self.app.show_config
+            ).pack(side="left")
             tk.Button(btm, text="Export CSV", command=self._export_csv).pack(
                 side="right"
             )
@@ -381,11 +436,16 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._detail_text.delete("1.0", "end")
             textbox = self._detail_text
 
+        textbox.tag_configure("header_label", foreground=theme.TEXT_MUTED)
+        textbox.tag_configure("header_value", foreground=theme.TEXT_PRIMARY)
+        textbox.tag_configure("divider", foreground=theme.TEXT_DISABLED)
         textbox.tag_configure("link", foreground=theme.LINK, underline=True)
         textbox.tag_configure("link_hover", foreground=theme.LINK_HOVER, underline=True)
 
-        textbox.insert("end", f"Granule: {report.granule_ur}\n")
-        textbox.insert("end", f"Concept ID: {report.concept_id}\n")
+        textbox.insert("end", "Granule: ", "header_label")
+        textbox.insert("end", f"{report.granule_ur}\n", "header_value")
+        textbox.insert("end", "Concept ID: ", "header_label")
+        textbox.insert("end", f"{report.concept_id}\n", "header_value")
         textbox.insert("end", "View in Earthdata Search", "link")
         textbox.insert("end", "\n")
 
@@ -399,7 +459,7 @@ class ResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             textbox.config(cursor=""),
         ])
 
-        textbox.insert("end", "\n")
+        textbox.insert("end", "  ────────────────────────\n\n", "divider")
 
         for status, color in _STATUS_COLORS.items():
             textbox.tag_configure(f"status_{status}", foreground=color)

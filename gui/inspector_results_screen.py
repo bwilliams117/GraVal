@@ -37,6 +37,8 @@ _STATUS_COLORS = {
     "FAIL": theme.STATUS_FAIL,
 }
 
+_STATUS_SYMBOLS = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}
+
 _ROW_STATUS_LABELS = {
     "waiting":     "Waiting",
     "starting":    "Starting...",
@@ -44,6 +46,15 @@ _ROW_STATUS_LABELS = {
     "inspecting":  "Inspecting...",
     "done":        "Done",
     "failed":      "Failed",
+}
+
+_STATE_DOT_COLORS = {
+    "waiting":     theme.TEXT_DISABLED,
+    "starting":    theme.ACCENT,
+    "downloading": theme.ACCENT,
+    "inspecting":  theme.ACCENT,
+    "done":        theme.STATUS_PASS,
+    "failed":      theme.STATUS_FAIL,
 }
 
 
@@ -82,71 +93,98 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         max_granules = cfg.get("max_granules", 1)
 
         self._progress_frame = (
-            ctk.CTkFrame(self, fg_color="transparent") if _HAS_CTK else tk.Frame(self)
+            ctk.CTkFrame(self, fg_color=theme.SURFACE_1, corner_radius=12)
+            if _HAS_CTK else tk.Frame(self, bg=theme.SURFACE_1)
         )
         self._progress_frame.place(relx=0.5, rely=0.5, anchor="center")
 
+        inner = (
+            ctk.CTkFrame(self._progress_frame, fg_color="transparent")
+            if _HAS_CTK else tk.Frame(self._progress_frame, bg=theme.SURFACE_1)
+        )
+        inner.pack(padx=40, pady=28)
+
         if _HAS_CTK:
             ctk.CTkLabel(
-                self._progress_frame,
+                inner,
                 text=f"Inspecting: {short_name}",
                 font=theme.FONT_H3,
+            ).pack(pady=(0, 4))
+            ctk.CTkLabel(
+                inner,
+                text="Downloading and inspecting granules…",
+                font=theme.FONT_SMALL,
+                text_color=theme.TEXT_MUTED,
             ).pack(pady=(0, 16))
         else:
             tk.Label(
-                self._progress_frame,
+                inner,
                 text=f"Inspecting: {short_name}",
                 font=theme.FONT_H3,
+                bg=theme.SURFACE_1, fg=theme.TEXT_PRIMARY,
+            ).pack(pady=(0, 4))
+            tk.Label(
+                inner,
+                text="Downloading and inspecting granules…",
+                font=("Helvetica", 10),
+                bg=theme.SURFACE_1, fg=theme.TEXT_MUTED,
             ).pack(pady=(0, 16))
 
         # Per-granule rows.
         rows_container = (
-            ctk.CTkFrame(self._progress_frame) if _HAS_CTK else tk.Frame(self._progress_frame)
+            ctk.CTkFrame(inner, fg_color="transparent")
+            if _HAS_CTK else tk.Frame(inner, bg=theme.SURFACE_1)
         )
-        rows_container.pack(fill="x", padx=4, pady=(0, 16))
+        rows_container.pack(fill="x", padx=4, pady=(0, 12))
 
         for i in range(max_granules):
             row = self._build_granule_row(rows_container, i)
             self._granule_rows.append(row)
 
+        # Separator above overall progress.
+        tk.Frame(inner, height=1, bg=theme.BORDER_SUBTLE).pack(
+            fill="x", pady=(0, 12)
+        )
+
         # Overall progress bar.
         if _HAS_CTK:
-            self._overall_bar = ctk.CTkProgressBar(self._progress_frame, width=480)
+            self._overall_bar = ctk.CTkProgressBar(inner, width=480)
             self._overall_bar.set(0)
             self._overall_bar.pack(pady=(0, 6))
             self._overall_label = ctk.CTkLabel(
-                self._progress_frame,
+                inner,
                 text="0 / 0 granules complete",
                 font=theme.FONT_SMALL,
                 text_color=theme.TEXT_MUTED,
             )
             self._overall_label.pack(pady=(0, 16))
             self._cancel_btn = ctk.CTkButton(
-                self._progress_frame, text="Cancel",
+                inner, text="Cancel",
                 command=self._cancel, width=100,
                 fg_color=theme.STATUS_FAIL, hover_color=theme.STATUS_FAIL_HVR,
             )
             self._cancel_btn.pack()
         else:
             self._overall_bar = ttk.Progressbar(
-                self._progress_frame, length=480, mode="determinate"
+                inner, length=480, mode="determinate"
             )
             self._overall_bar.pack(pady=(0, 6))
             self._overall_label = tk.Label(
-                self._progress_frame, text="0 / 0 granules complete"
+                inner, text="0 / 0 granules complete",
+                bg=theme.SURFACE_1, fg=theme.TEXT_MUTED,
             )
             self._overall_label.pack(pady=(0, 16))
             self._cancel_btn = tk.Button(
-                self._progress_frame, text="Cancel", command=self._cancel
+                inner, text="Cancel", command=self._cancel
             )
             self._cancel_btn.pack()
 
     def _build_granule_row(self, parent, idx: int) -> dict:
         """Build one granule progress row and return widget references."""
         row_frame = (
-            ctk.CTkFrame(parent, fg_color=theme.SURFACE_1)
+            ctk.CTkFrame(parent, fg_color=theme.SURFACE_2)
             if _HAS_CTK
-            else tk.Frame(parent, bg=theme.SURFACE_1, relief="flat", bd=1)
+            else tk.Frame(parent, bg=theme.SURFACE_2, relief="flat", bd=1)
         )
         row_frame.pack(fill="x", padx=8, pady=4, ipady=4)
 
@@ -155,10 +193,16 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         status_var = tk.StringVar(value="Waiting")
 
         if _HAS_CTK:
+            dot_label = ctk.CTkLabel(
+                row_frame, text="●",
+                font=theme.FONT_CAPTION, text_color=theme.TEXT_DISABLED, width=16,
+            )
+            dot_label.pack(side="left", padx=(10, 4))
+
             ctk.CTkLabel(
                 row_frame, textvariable=name_var,
                 font=theme.FONT_SMALL, width=260, anchor="w",
-            ).pack(side="left", padx=(10, 6))
+            ).pack(side="left", padx=(0, 6))
 
             bar = ctk.CTkProgressBar(row_frame, width=180, height=8)
             bar.set(0)
@@ -174,23 +218,33 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 font=theme.FONT_CAPTION, text_color=theme.TEXT_MUTED, width=90,
             ).pack(side="left", padx=(0, 10))
         else:
-            tk.Label(row_frame, textvariable=name_var, width=32, anchor="w").pack(
-                side="left", padx=(8, 4)
+            dot_label = tk.Label(
+                row_frame, text="●",
+                bg=theme.SURFACE_2, fg=theme.TEXT_DISABLED,
             )
+            dot_label.pack(side="left", padx=(8, 4))
+
+            tk.Label(
+                row_frame, textvariable=name_var, width=32, anchor="w",
+                bg=theme.SURFACE_2,
+            ).pack(side="left", padx=(0, 4))
             bar = ttk.Progressbar(row_frame, length=180, mode="determinate")
             bar.pack(side="left", padx=(0, 4))
-            tk.Label(row_frame, textvariable=bytes_var, width=14).pack(
-                side="left", padx=(0, 4)
-            )
-            tk.Label(row_frame, textvariable=status_var, width=12).pack(
-                side="left", padx=(0, 8)
-            )
+            tk.Label(
+                row_frame, textvariable=bytes_var, width=14,
+                bg=theme.SURFACE_2,
+            ).pack(side="left", padx=(0, 4))
+            tk.Label(
+                row_frame, textvariable=status_var, width=12,
+                bg=theme.SURFACE_2,
+            ).pack(side="left", padx=(0, 8))
 
         return {
             "name_var": name_var,
             "bytes_var": bytes_var,
             "status_var": status_var,
             "bar": bar,
+            "dot_label": dot_label,
             "_has_ctk": _HAS_CTK,
         }
 
@@ -205,6 +259,12 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         short_ur = granule_ur[:42] + "…" if len(granule_ur) > 42 else granule_ur
         row["name_var"].set(short_ur)
         row["status_var"].set(_ROW_STATUS_LABELS.get(state, state))
+
+        dot_color = _STATE_DOT_COLORS.get(state, theme.TEXT_DISABLED)
+        if row["_has_ctk"]:
+            row["dot_label"].configure(text_color=dot_color)
+        else:
+            row["dot_label"].configure(fg=dot_color)
 
         if state == "downloading" and total_bytes > 0:
             pct = bytes_so_far / total_bytes
@@ -233,7 +293,6 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     def _poll(self):
         """Drain the runner queue every 100ms until the run completes."""
         q = self._runner.result_queue
-        max_granules = self._check_config.get("max_granules", 1)
         try:
             while True:
                 item = q.get_nowait()
@@ -310,18 +369,41 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         )
         summary_frame.pack(fill="x", padx=16, pady=(16, 8))
 
-        summary_text = (
-            f"{len(run.granule_reports)} granule(s) inspected  ·  "
-            f"PASS: {run.pass_count}  ·  WARN: {run.warn_count}  ·  FAIL: {run.fail_count}"
-        )
         if _HAS_CTK:
             ctk.CTkLabel(
-                summary_frame, text=summary_text, font=theme.FONT_H4,
-            ).pack(side="left", padx=8)
+                summary_frame,
+                text=f"{len(run.granule_reports)} granule(s) inspected",
+                font=theme.FONT_H4,
+            ).pack(side="left", padx=(8, 16))
+            for symbol, count, color in [
+                ("✓", run.pass_count, theme.STATUS_PASS),
+                ("!", run.warn_count, theme.STATUS_WARN),
+                ("✗", run.fail_count, theme.STATUS_FAIL),
+            ]:
+                ctk.CTkLabel(
+                    summary_frame,
+                    text=f"  {symbol}  {count}  ",
+                    font=theme.FONT_BODY_BOLD,
+                    text_color=color,
+                    fg_color=theme.SURFACE_2,
+                    corner_radius=6,
+                ).pack(side="left", padx=(0, 6), ipady=2)
         else:
             tk.Label(
-                summary_frame, text=summary_text, font=theme.FONT_H4,
-            ).pack(side="left")
+                summary_frame,
+                text=f"{len(run.granule_reports)} granule(s) inspected",
+                font=("Helvetica", 11, "bold"),
+            ).pack(side="left", padx=(0, 16))
+            for symbol, count, color in [
+                ("✓", run.pass_count, theme.STATUS_PASS),
+                ("!", run.warn_count, theme.STATUS_WARN),
+                ("✗", run.fail_count, theme.STATUS_FAIL),
+            ]:
+                tk.Label(
+                    summary_frame,
+                    text=f"  {symbol}  {count}  ",
+                    bg=theme.SURFACE_2, fg=color,
+                ).pack(side="left", padx=(0, 6), ipadx=8, ipady=2)
 
         if run.errors:
             err_text = "Errors: " + "; ".join(run.errors)
@@ -346,12 +428,15 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._tree = ttk.Treeview(
             left, columns=cols, show="headings", selectmode="browse"
         )
-        self._tree.heading("status", text="Status")
+        self._tree.heading("status", text="")
         self._tree.heading("granule_ur", text="Granule UR")
         self._tree.heading("checks", text="Checks")
-        self._tree.column("status", width=60, minwidth=50, stretch=False)
+        self._tree.column("status", width=44, minwidth=36, stretch=False)
         self._tree.column("granule_ur", width=260, minwidth=100)
         self._tree.column("checks", width=80, minwidth=60, stretch=False)
+
+        self._tree.tag_configure("row_WARN", foreground=theme.STATUS_WARN)
+        self._tree.tag_configure("row_FAIL", foreground=theme.STATUS_FAIL)
 
         vsb = ttk.Scrollbar(left, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -363,11 +448,13 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         for report in run.granule_reports:
             total = len(report.checks)
             passed = sum(1 for c in report.checks if c.status == Status.PASS)
+            status = report.overall_status.value
+            tag = () if status == "PASS" else (f"row_{status}",)
             self._tree.insert("", "end", values=(
-                report.overall_status.value,
+                _STATUS_SYMBOLS.get(status, status),
                 report.granule_ur,
                 f"{passed}/{total}",
-            ))
+            ), tags=tag)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_granule_select)
 
@@ -404,14 +491,14 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             self._detail_text = ctk.CTkTextbox(
-                text_frame, font=("Courier", 11), wrap="word"
+                text_frame, font=theme.FONT_SMALL, wrap="word"
             )
             self._detail_text.pack(fill="both", expand=True)
             self._detail_text.insert("end", "Select a granule to see check details.")
             self._detail_text.configure(state="disabled")
         else:
             self._detail_text = tk.Text(
-                text_frame, font=("Courier", 10), wrap="word", state="disabled"
+                text_frame, font=theme.FONT_SMALL, wrap="word", state="disabled"
             )
             vsb2 = ttk.Scrollbar(
                 text_frame, orient="vertical", command=self._detail_text.yview
@@ -419,6 +506,8 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._detail_text.configure(yscrollcommand=vsb2.set)
             self._detail_text.pack(side="left", fill="both", expand=True)
             vsb2.pack(side="right", fill="y")
+
+        tk.Frame(self, height=1, bg=theme.BORDER_SUBTLE).pack(fill="x", padx=16)
 
         btm = ctk.CTkFrame(self) if _HAS_CTK else tk.Frame(self)
         btm.pack(fill="x", padx=16, pady=(0, 16))
@@ -512,11 +601,16 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             self._detail_text.delete("1.0", "end")
             textbox = self._detail_text
 
+        textbox.tag_configure("header_label", foreground=theme.TEXT_MUTED)
+        textbox.tag_configure("header_value", foreground=theme.TEXT_PRIMARY)
+        textbox.tag_configure("divider", foreground=theme.TEXT_DISABLED)
         textbox.tag_configure("link", foreground=theme.LINK, underline=True)
         textbox.tag_configure("link_hover", foreground=theme.LINK_HOVER, underline=True)
 
-        textbox.insert("end", f"Granule: {report.granule_ur}\n")
-        textbox.insert("end", f"Concept ID: {report.concept_id}\n")
+        textbox.insert("end", "Granule: ", "header_label")
+        textbox.insert("end", f"{report.granule_ur}\n", "header_value")
+        textbox.insert("end", "Concept ID: ", "header_label")
+        textbox.insert("end", f"{report.concept_id}\n", "header_value")
 
         # Earthdata Search link (OPS only; concept IDs differ in UAT).
         env = self._check_config.get("env", "OPS")
@@ -560,7 +654,13 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 textbox.config(cursor=""),
             ])
 
-        textbox.insert("end", "\n")
+        textbox.insert(
+            "end",
+            "  ──────────"
+            "──────────"
+            "────\n\n",
+            "divider",
+        )
 
         for status, color in _STATUS_COLORS.items():
             textbox.tag_configure(f"status_{status}", foreground=color)
@@ -587,9 +687,9 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             return _toggle
 
         for check in report.checks:
-            symbol = {"PASS": "✓", "WARN": "!", "FAIL": "✗"}.get(
-                check.status.value, "?"
-            )
+            symbol = {
+                "PASS": "✓", "WARN": "!", "FAIL": "✗"
+            }.get(check.status.value, "?")
             status_tag = f"status_{check.status.value}"
             textbox.insert("end", f"[{check.status.value}] {symbol} ", status_tag)
             textbox.insert("end", f"{check.check_name}\n")

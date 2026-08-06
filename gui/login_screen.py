@@ -107,14 +107,21 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._build_entry(container, "Password", "Earthdata password", show="•")
 
         self._status_label = (
-            ctk.CTkLabel(container, text="", font=("Helvetica", 11))
+            ctk.CTkLabel(
+                container, text="", font=("Helvetica", 11),
+                width=_ENTRY_W, wraplength=_ENTRY_W, justify="center",
+            )
             if _HAS_CTK
-            else tk.Label(container, text="")
+            else tk.Label(
+                container, text="",
+                wraplength=_ENTRY_W, justify="center",
+            )
         )
         self._status_label.pack(pady=(14, 4))
 
         self._progress = _ProgressBar(container, mode="indeterminate")
         self._progress.pack(fill="x", padx=2, pady=(0, 14))
+        self._progress.pack_forget()
         if _HAS_CTK:
             self._progress.set(0)
         else:
@@ -177,19 +184,21 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         self._env_var = tk.StringVar(value="UAT")
 
         if _HAS_CTK:
-            ctk.CTkSegmentedButton(
+            self._env_toggle = ctk.CTkSegmentedButton(
                 env_frame,
                 values=["UAT", "OPS"],
                 variable=self._env_var,
-                width=160,
+                width=200,
+                height=36,
                 font=theme.FONT_BODY_BOLD,
-            ).pack()
-            ctk.CTkLabel(
-                env_frame,
-                text="Environment applies to all tools in this session.",
-                font=theme.FONT_TINY,
-                text_color=theme.TEXT_DISABLED,
-            ).pack(pady=(4, 0))
+                selected_color=theme.STATUS_WARN,
+                unselected_color=theme.SURFACE_2,
+                unselected_hover_color=theme.BORDER_STRONG,
+                text_color=theme.SURFACE_0,
+                text_color_disabled=theme.TEXT_MUTED,
+                command=self._on_env_change,
+            )
+            self._env_toggle.pack()
         else:
             btn_frame = tk.Frame(env_frame, bg=theme.SURFACE_0)
             btn_frame.pack()
@@ -199,12 +208,6 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                     bg=theme.SURFACE_0, fg=theme.TEXT_PRIMARY,
                     selectcolor=theme.SURFACE_2,
                 ).pack(side="left", padx=8)
-            tk.Label(
-                env_frame,
-                text="Environment applies to all tools in this session.",
-                font=theme.FONT_CAPTION,
-                bg=theme.SURFACE_0, fg=theme.TEXT_DISABLED,
-            ).pack(pady=(4, 0))
 
     def _build_entry(self, container, label_text, placeholder, show):
         """Add a labelled text entry (username or password) to *container*."""
@@ -289,6 +292,7 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
     def _start_login(self, username, password):
         self._btn.configure(state="disabled")
+        self._progress.pack(fill="x", padx=2, pady=(0, 14))
         if _HAS_CTK:
             self._progress.configure(mode="indeterminate")
         self._progress.start()
@@ -314,8 +318,8 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                         self.after(
                             0,
                             lambda: self._on_failure(
-                                "No UAT credentials found — add "
-                                "EARTHDATA_USERNAME / EARTHDATA_PASSWORD to .env"
+                                "No credentials found. Please enter your "
+                                "Earthdata username and password above."
                             ),
                         )
                         return
@@ -360,10 +364,10 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                     if create_resp.status_code not in (200, 201):
                         self.after(
                             0,
-                            lambda c=create_resp.status_code: self._on_failure(
-                                f"UAT login failed (HTTP {c}) — check your UAT "
-                                "credentials, or create a token at "
-                                "uat.urs.earthdata.nasa.gov/profile/personal_tokens"
+                            lambda: self._on_failure(
+                                "Incorrect username or password. "
+                                "Please check your UAT Earthdata credentials "
+                                "and try again."
                             ),
                         )
                         return
@@ -378,7 +382,8 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                     self.after(
                         0,
                         lambda: self._on_failure(
-                            "UAT token response did not contain an access_token"
+                            "Login succeeded but no access token was returned. "
+                            "Try again or contact your system administrator."
                         ),
                     )
                     return
@@ -412,7 +417,8 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 self.after(
                     0,
                     lambda: self._on_failure(
-                        "Authentication failed — check your credentials"
+                        "Incorrect username or password. "
+                        "Please check your Earthdata credentials and try again."
                     ),
                 )
                 return
@@ -433,9 +439,14 @@ class LoginScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         else:
             self._status_label.configure(text=text)
 
+    def _on_env_change(self, value: str):
+        color = theme.STATUS_WARN if value == "UAT" else theme.ACCENT
+        self._env_toggle.configure(selected_color=color)
+
     def _on_failure(self, message: str):
         self._progress.stop()
         if _HAS_CTK:
             self._progress.set(0)
+        self._progress.pack_forget()
         self._btn.configure(state="normal")
         self._set_status(f"Error: {message}", color=theme.STATUS_FAIL)

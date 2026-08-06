@@ -73,9 +73,6 @@ class HomeScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         hdr.pack(fill="x", padx=24, pady=(20, 0))
 
         _Label(hdr, text="GraVal", font=("Helvetica", 22, "bold")).pack(side="left")
-        _Button(
-            hdr, text="Sign Out", command=self._on_signout, width=90
-        ).pack(side="right")
 
         sub = _Frame(self, fg_color="transparent")
         sub.pack(fill="x", padx=24, pady=(6, 20))
@@ -87,6 +84,16 @@ class HomeScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         ).pack(side="left")
 
         tk.Frame(self, height=1, bg=theme.BORDER_STRONG).pack(fill="x")
+
+        # Footer packed before the card area so it anchors to the bottom edge.
+        footer = _Frame(self, fg_color="transparent")
+        footer.pack(side="bottom", fill="x", padx=24, pady=(8, 16))
+        _Button(
+            footer, text="Sign Out", command=self._on_signout, width=100,
+            fg_color=theme.SURFACE_2,
+            hover_color=theme.BORDER_STRONG,
+            text_color=theme.TEXT_MUTED,
+        ).pack(side="left")
 
         if _HAS_CTK:
             card_area = ctk.CTkScrollableFrame(self, fg_color="transparent")

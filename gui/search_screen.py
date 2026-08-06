@@ -23,6 +23,22 @@ _DAACS = [
     "ORNLDAAC", "LPDAAC", "GES_DISC", "OBDAAC", "SEDAC", "LAADS", "ASDC",
 ]
 
+# Maps DAAC labels to their UAT CMR provider IDs.
+# Each entry is a list because a DAAC may have both on-prem and cloud providers in UAT.
+_UAT_DAAC_PROVIDERS: dict[str, list[str]] = {
+    "NSIDC":    ["NSIDC_TS1", "NSIDC_CUAT"],
+    "GHRCDAAC": ["GHRC", "GHRC_CLOUD"],
+    "PODAAC":   ["PODAAC", "POCLOUD"],
+    "ASF":      ["ASF"],
+    "ORNLDAAC": ["ORNL_DAAC", "ORNL_CLOUD"],
+    "LPDAAC":   ["LPDAAC_TS1", "LPCLOUDUAT"],
+    "GES_DISC": ["GES_DISC", "GESDISCCLD"],
+    "OBDAAC":   ["OB_DAAC", "OB_CLOUD"],
+    "SEDAC":    ["SEDAC"],
+    "LAADS":    ["LAADS", "LAADSCDUAT"],
+    "ASDC":     ["LARC_ASDC", "LARC_CLOUD"],
+}
+
 
 class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
     """Collection search with DAAC filter and paginated Treeview results."""
@@ -117,17 +133,17 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
 
         if _HAS_CTK:
             ctk.CTkButton(
-                btm, text="← Back", command=self.app.show_home, width=140
+                btm, text="Back", command=self.app.show_home, width=140
             ).pack(side="left")
             self._select_btn = ctk.CTkButton(
-                btm, text="Select Collection →",
+                btm, text="Select Collection",
                 command=self._on_select, state="disabled", width=180,
             )
             self._select_btn.pack(side="right")
         else:
-            tk.Button(btm, text="← Back", command=self.app.show_home).pack(side="left")
+            tk.Button(btm, text="Back", command=self.app.show_home).pack(side="left")
             self._select_btn = tk.Button(
-                btm, text="Select →", command=self._on_select, state="disabled"
+                btm, text="Select", command=self._on_select, state="disabled"
             )
             self._select_btn.pack(side="right")
 
@@ -202,16 +218,36 @@ class SearchScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         params = {"has_granules": "true", "page_size": 20}
 
         if daac:
-            params["provider"] = daac
+            providers = _UAT_DAAC_PROVIDERS.get(daac, [daac])
+            seen: set[str] = set()
+            all_items: list[dict] = []
+            for provider in providers:
+                p = {**params, "provider": provider}
+                for search_mode in ("short_name", "keyword"):
+                    resp = requests.get(
+                        base_url, params={**p, search_mode: query},
+                        headers=headers, timeout=20
+                    )
+                    resp.raise_for_status()
+                    items = resp.json().get("items", [])
+                    for item in items:
+                        cid = item.get("meta", {}).get("concept-id", "")
+                        if cid not in seen:
+                            seen.add(cid)
+                            all_items.append(
+                                {"umm": item.get("umm", {}), "meta": item.get("meta", {})}
+                            )
+                    if all_items:
+                        break  # short_name hit — skip keyword fallback for this provider
+            return all_items
 
-        # Try short_name first, then fall back to keyword search.
+        # No DAAC filter — try short_name then keyword across all providers.
         for search_mode in ("short_name", "keyword"):
             p = {**params, search_mode: query}
             resp = requests.get(base_url, params=p, headers=headers, timeout=20)
             resp.raise_for_status()
             items = resp.json().get("items", [])
             if items:
-                # Normalise to the same dict shape earthaccess returns.
                 return [
                     {"umm": item.get("umm", {}), "meta": item.get("meta", {})}
                     for item in items

@@ -19,6 +19,7 @@ from .checks import (
     Status,
     check_collection_reference,
     check_daynight_consistency,
+    check_duplicate_detection,
     check_file_size_sanity,
     check_production_date_sanity,
     check_schema_completeness,
@@ -114,6 +115,29 @@ class DeepValidationRun:
         return sum(
             1 for r in self.granule_reports if r.overall_status == Status.FAIL
         )
+
+
+def _declared_mb_from_granule(granule) -> float | None:
+    """Sum SizeInBytes (preferred) or Size+SizeUnit entries from ArchiveAndDistributionInformation."""
+    entries = (
+        granule.get("umm", {})
+        .get("DataGranule", {})
+        .get("ArchiveAndDistributionInformation", [])
+    )
+    total_mb = 0.0
+    found = False
+    for entry in entries:
+        size_bytes = entry.get("SizeInBytes")
+        mb = entry.get("Size")
+        unit = entry.get("SizeUnit", "MB").upper()
+        if size_bytes is not None:
+            total_mb += size_bytes / 1_048_576
+            found = True
+        elif mb is not None:
+            multiplier = {"KB": 1/1024, "MB": 1, "GB": 1024, "TB": 1024**2}.get(unit, 1)
+            total_mb += mb * multiplier
+            found = True
+    return total_mb if found else None
 
 
 # ── format detection & sidecar helpers ───────────────────────────────────────
@@ -226,9 +250,14 @@ def _parse_sidecar(sidecar_path: Path) -> dict:
         std["DayNightFlag"] = dg.get("DayNightFlag", "")
         std["ProductionDateTime"] = dg.get("ProductionDateTime", "")
         for entry in dg.get("ArchiveAndDistributionInformation", []):
+            size_bytes = entry.get("SizeInBytes")
             mb = entry.get("Size")
             unit = entry.get("SizeUnit", "MB").upper()
-            if mb is not None:
+            if size_bytes is not None:
+                std["SizeMBDataGranule"] = (
+                    (std["SizeMBDataGranule"] or 0) + size_bytes / 1_048_576
+                )
+            elif mb is not None:
                 multiplier = {"KB": 1/1024, "MB": 1, "GB": 1024, "TB": 1024**2}.get(
                     unit, 1
                 )
@@ -394,6 +423,10 @@ class DeepValidationRunner:
 
             total = len(granules)
 
+            dup_results: list[CheckResult] = []
+            if "duplicates" in enabled_meta:
+                dup_results = check_duplicate_detection(granules)
+
             for idx, granule in enumerate(granules):
                 if self._cancelled.is_set():
                     self._put("cancelled", None)
@@ -424,6 +457,9 @@ class DeepValidationRunner:
                     browse_url=browse_url,
                 )
 
+                if dup_results:
+                    report.checks.append(dup_results[idx])
+
                 # ── metadata checks (same as existing Validator) ──────────────
                 self._run_metadata_checks(
                     report, granule, short_name, enabled_meta,
@@ -443,7 +479,7 @@ class DeepValidationRunner:
 
                 try:
                     granule_folder.mkdir(parents=True, exist_ok=True)
-                    download_ok = self._download_granule(
+                    download_ok, dl_errors = self._download_granule(
                         granule, env, uat_token, granule_folder, idx, granule_ur
                     )
                 except Exception as exc:
@@ -461,10 +497,17 @@ class DeepValidationRunner:
                     return
 
                 if not download_ok:
-                    report.checks.append(CheckResult(
-                        "Download", Status.FAIL,
-                        "No downloadable files found for this granule",
-                    ))
+                    if dl_errors:
+                        report.checks.append(CheckResult(
+                            "Download", Status.FAIL,
+                            f"All {len(dl_errors)} download attempt(s) failed",
+                            {"errors": dl_errors},
+                        ))
+                    else:
+                        report.checks.append(CheckResult(
+                            "Download", Status.FAIL,
+                            "No downloadable files found for this granule",
+                        ))
                     run.granule_reports.append(report)
                     continue
 
@@ -491,6 +534,7 @@ class DeepValidationRunner:
                     self._run_file_checks(
                         report, science_files, report.sidecar_path,
                         file_format, cfg, enabled_file,
+                        declared_mb=_declared_mb_from_granule(granule),
                     )
                 except Exception as exc:
                     report.checks.append(CheckResult(
@@ -671,7 +715,8 @@ class DeepValidationRunner:
             and u.get("URL", "").startswith(("https://", "http://"))
         ]
 
-        # Sidecar/metadata links (XML/JSON).
+        # Sidecar/metadata links (XML/JSON) — HTTPS only; s3:// URLs cannot be
+        # streamed by requests and would raise InvalidSchema.
         sidecar_links = [
             u["URL"] for u in related
             if u.get("Type") in (
@@ -681,43 +726,55 @@ class DeepValidationRunner:
                 "VIEW RELATED INFORMATION",
             )
             and u.get("URL", "").lower().endswith((".xml", ".json", ".cmr.xml"))
+            and u.get("URL", "").startswith(("https://", "http://"))
         ]
 
         # all_links is the union used by UAT streaming and OPS fallback.
         all_links = list(dict.fromkeys(get_data_https + data_links + sidecar_links))
         if not all_links and not data_links:
-            return False
+            return False, []
 
         if env == "OPS":
-            self._download_ops(granule, all_links, dest_folder, granule_idx, granule_ur)
+            dl_errors = self._download_ops(
+                granule, all_links, dest_folder, granule_idx, granule_ur
+            )
         else:
-            self._download_uat(all_links, uat_token, dest_folder, granule_idx, granule_ur)
+            dl_errors = self._download_uat(
+                all_links, uat_token, dest_folder, granule_idx, granule_ur
+            )
 
-        return any(dest_folder.iterdir())
+        ok = any(dest_folder.iterdir())
+        return ok, [] if ok else dl_errors
 
-    def _download_ops(self, granule, links: list[str], dest: Path, idx: int, gur: str):
+    def _download_ops(
+        self, granule, links: list[str], dest: Path, idx: int, gur: str
+    ) -> list[str]:
         """Download OPS files, preferring cancellable HTTPS streaming over earthaccess."""
         https_links = [l for l in links if l.startswith("https://")]
+        errors: list[str] = []
         if https_links:
             # Stream via authenticated HTTPS so cancel checks fire between chunks.
             session = earthaccess.get_requests_https_session()
-            self._stream_links(https_links, dest, session.get, {}, idx, gur)
+            errors = self._stream_links(https_links, dest, session.get, {}, idx, gur)
             if any(dest.iterdir()):
-                return
+                return []
 
         if self._cancelled.is_set():
-            return
+            return errors
 
         # S3-only granule: fall back to earthaccess (blocking, not interruptible).
         try:
             earthaccess.download([granule], local_path=str(dest))
         except Exception:
             pass
+        return errors
 
-    def _download_uat(self, links: list[str], token: str, dest: Path, idx: int, gur: str):
+    def _download_uat(
+        self, links: list[str], token: str, dest: Path, idx: int, gur: str
+    ) -> list[str]:
         """Download UAT files via HTTPS streaming with Bearer token auth."""
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        self._stream_links(links, dest, requests.get, headers, idx, gur)
+        return self._stream_links(links, dest, requests.get, headers, idx, gur)
 
     def _stream_links(
         self,
@@ -727,11 +784,15 @@ class DeepValidationRunner:
         headers: dict,
         idx: int,
         gur: str,
-    ):
-        """Stream each URL to disk, emitting download_progress queue messages per chunk."""
+    ) -> list[str]:
+        """Stream each URL to disk, emitting download_progress queue messages per chunk.
+
+        Returns a list of error strings for every URL that failed.
+        """
+        errors: list[str] = []
         for file_num, url in enumerate(links):
             if self._cancelled.is_set():
-                return
+                return errors
             filename = url.split("/")[-1].split("?")[0] or f"file_{file_num}"
             out_path = dest / filename
             try:
@@ -747,7 +808,7 @@ class DeepValidationRunner:
                 with open(out_path, "wb") as fh:
                     for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
                         if self._cancelled.is_set():
-                            return
+                            return errors
                         if chunk:
                             fh.write(chunk)
                             bytes_so_far += len(chunk)
@@ -755,8 +816,10 @@ class DeepValidationRunner:
                                 "download_progress",
                                 (idx, gur, bytes_so_far, total_bytes, "downloading"),
                             )
-            except Exception:
+            except Exception as exc:
                 out_path.unlink(missing_ok=True)
+                errors.append(f"{filename}: {exc}")
+        return errors
 
     # ── check dispatch ────────────────────────────────────────────────────────
 
@@ -798,6 +861,7 @@ class DeepValidationRunner:
         file_format: str,
         cfg: dict,
         enabled: set[str],
+        declared_mb: float | None = None,
     ):
         """Dispatch file-level checks based on detected format."""
         if not science_files:
@@ -834,13 +898,13 @@ class DeepValidationRunner:
 
         # Format-agnostic checks.
         if "file_size" in enabled:
-            declared_mb = None
-            if sidecar_path:
+            size_mb = declared_mb
+            if size_mb is None and sidecar_path:
                 std = _parse_sidecar(sidecar_path)
-                declared_mb = std.get("SizeMBDataGranule")
+                size_mb = std.get("SizeMBDataGranule")
             report.checks.append(
                 check_file_size_accuracy(
-                    science_files, declared_mb,
+                    science_files, size_mb,
                     cfg.get("size_tolerance_pct", 20),
                 )
             )

@@ -762,7 +762,7 @@ def check_collection_cross_reference(
             f"https://{host}/search/collections.umm_json",
             params={"concept_id": concept_id},
             headers=headers,
-            timeout=20,
+            timeout=30,
         )
         resp.raise_for_status()
         items = resp.json().get("items", [])

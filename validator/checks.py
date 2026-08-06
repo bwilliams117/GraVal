@@ -44,6 +44,15 @@ def _is_epoch_placeholder(dt_str: str) -> bool:
     return dt_str.strip().lower() in _EPOCH_PLACEHOLDERS
 
 
+def _get_beginning_datetime_str(umm: dict) -> str | None:
+    """Return the beginning datetime string from RangeDateTime or SingleDateTime."""
+    te = umm.get("TemporalExtent", {})
+    return (
+        te.get("RangeDateTime", {}).get("BeginningDateTime")
+        or te.get("SingleDateTime")
+    )
+
+
 def _get_centroid(granule) -> tuple[float, float]:
     """Return (lat, lon) centroid from the granule's bounding geometry."""
     geom = (
@@ -104,14 +113,19 @@ def check_schema_completeness(granule) -> CheckResult:
 def check_temporal_validity(granule) -> CheckResult:
     """Verify that the temporal extent is well-formed, non-epoch, and not future-dated."""
     name = "Temporal Validity"
-    try:
-        rdt = granule["umm"]["TemporalExtent"]["RangeDateTime"]
-        begin_str = rdt.get("BeginningDateTime")
-        end_str = rdt.get("EndingDateTime")
-    except (KeyError, TypeError):
+    umm = granule.get("umm", {})
+    te = umm.get("TemporalExtent", {})
+    if not te:
+        return CheckResult(name, Status.FAIL, "TemporalExtent missing or malformed")
+
+    rdt = te.get("RangeDateTime", {})
+    begin_str = rdt.get("BeginningDateTime") or te.get("SingleDateTime")
+    end_str = rdt.get("EndingDateTime")
+
+    if begin_str is None:
         return CheckResult(
             name, Status.FAIL,
-            "TemporalExtent.RangeDateTime missing or malformed",
+            "TemporalExtent has neither RangeDateTime.BeginningDateTime nor SingleDateTime",
         )
 
     if not begin_str:
@@ -289,8 +303,10 @@ def check_daynight_consistency(granule) -> CheckResult:
             f"Cannot compute centroid for sun-position check: {e}",
         )
 
+    begin_str = _get_beginning_datetime_str(granule.get("umm", {}))
     try:
-        begin_str = granule["umm"]["TemporalExtent"]["RangeDateTime"]["BeginningDateTime"]
+        if not begin_str:
+            raise ValueError("no BeginningDateTime or SingleDateTime")
         obs_time = dateutil_parser.isoparse(begin_str)
         if obs_time.tzinfo is None:
             obs_time = obs_time.replace(tzinfo=timezone.utc)
@@ -552,12 +568,14 @@ def check_production_date_sanity(granule) -> CheckResult:
             " — likely a pipeline default",
         )
 
+    begin_str = _get_beginning_datetime_str(umm)
     try:
-        begin_str = umm["TemporalExtent"]["RangeDateTime"]["BeginningDateTime"]
+        if not begin_str:
+            raise ValueError("no BeginningDateTime or SingleDateTime")
         begin_dt = dateutil_parser.isoparse(begin_str)
         if begin_dt.tzinfo is None:
             begin_dt = begin_dt.replace(tzinfo=timezone.utc)
-    except (KeyError, TypeError, Exception):
+    except Exception:
         return CheckResult(
             name, Status.WARN,
             "BeginningDateTime unavailable — cannot compare against ProductionDateTime",

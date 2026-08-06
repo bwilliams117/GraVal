@@ -52,22 +52,37 @@ FONT_MONO_SMALL = ("Courier", 10)
 
 
 def place_env_badge(screen, env: str) -> None:
-    """Place a floating environment badge in the top-right corner of *screen*."""
+    """Place a floating pill-shaped environment badge in the top-right corner."""
     import tkinter as tk
 
     color = STATUS_WARN if env == "UAT" else ACCENT
-    lbl = tk.Label(
-        screen,
-        text=f"  {env}  ",
-        bg=color,
-        fg="#121212",
-        font=("Helvetica", 10, "bold"),
-        relief="flat",
-        padx=2,
-        pady=2,
-    )
-    lbl.place(relx=1.0, rely=0.0, anchor="ne", x=-130, y=12)
-    lbl.lift()
+
+    try:
+        import customtkinter as ctk
+        badge = ctk.CTkLabel(
+            screen,
+            text=f"●  {env}",
+            font=FONT_SMALL,
+            text_color=color,
+            fg_color=SURFACE_2,
+            corner_radius=20,
+            width=76,
+            height=28,
+        )
+    except ImportError:
+        badge = tk.Label(
+            screen,
+            text=f"●  {env}",
+            bg=SURFACE_2,
+            fg=color,
+            font=("Helvetica", 10, "bold"),
+            relief="flat",
+            padx=10,
+            pady=4,
+        )
+
+    badge.place(relx=1.0, rely=0.0, anchor="ne", x=-16, y=12)
+    badge.lift()
 
 
 def setup_ttk_style() -> None:

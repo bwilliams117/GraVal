@@ -1,5 +1,7 @@
 # GraVal — NASA Granule Validation Tool
 
+**Version 1.0.0**
+
 GraVal is a desktop GUI for validating NASA Earthdata granule collections. It provides two instruments — a fast metadata spot-checker and a deep file-level inspector — accessible from a card-based home dashboard. Built with Python and customtkinter, GraVal supports both the OPS and UAT Earthdata environments.
 
 ---

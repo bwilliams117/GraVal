@@ -6,7 +6,7 @@ GUI tool for spot-checking NASA granule collections. Samples N granules from a c
 ## Run
 ```bash
 source .venv/bin/activate
-python main.py
+.venv/bin/python main.py
 ```
 
 ## Auth
@@ -33,7 +33,9 @@ gui/
   theme.json             — CTk custom color theme; accent #00b4d8 replaces CTk default blue; loaded by
                            absolute path via os.path.join(__file__, "theme.json") in app.py
   app.py                 — ValidatorApp (CTk/Tk root); title "GraVal"; 1600x900 window, minsize 800x560;
-                           loads theme.json by absolute path; dark mode; shared state (auth,
+                           loads theme.json by path supporting both normal execution
+                           (os.path.join(__file__, "theme.json")) and PyInstaller frozen builds
+                           (sys._MEIPASS + "gui/theme.json"); dark mode; shared state (auth,
                            selected_collection, last_validation_run); drives screen transitions via
                            show_login/show_home/show_search/show_config/show_results()
   login_screen.py        — split-pane auth screen: left panel = form ("Sign in" heading, "use your
@@ -65,8 +67,8 @@ gui/
                            _on_error(); "← New Validation" button → show_config()
 validator/
   checks.py              — 9 check functions + helpers (_get_centroid, _is_epoch_placeholder,
-                           _EPOCH_PLACEHOLDERS frozenset); each returns CheckResult(check_name, status,
-                           message, details)
+                           _human_size, _EPOCH_PLACEHOLDERS frozenset); each returns
+                           CheckResult(check_name, status, message, details)
   runner.py              — ValidationRunner (background thread + queue.Queue); GranuleReport;
                            ValidationRun; CHECKS registry; ALL_CHECK_IDS order list; duplicates check
                            is whole-sample (handled outside the per-granule loop)
@@ -108,7 +110,7 @@ LoginScreen → HomeScreen → SearchScreen → ConfigScreen → ResultsScreen
 | `duplicates` | No repeated concept-ids across the sample (whole-sample check, not per-granule) |
 
 ### Epoch/Placeholder Detection
-`_is_epoch_placeholder(dt_str)` does a case-insensitive exact match against `_EPOCH_PLACEHOLDERS` — a frozenset of 5 known sentinel values: `1970-01-01`, `1970-01-01T00:00:00`, `1970-01-01T00:00:00Z`, `0001-01-01`, `0001-01-01T00:00:00Z`. Shared by `check_temporal_validity` and `check_production_date_sanity`.
+`_is_epoch_placeholder(dt_str)` calls `.strip().lower()` on the input and matches against `_EPOCH_PLACEHOLDERS` — a frozenset of 5 lowercase sentinel strings: `1970-01-01t00:00:00z`, `1970-01-01t00:00:00`, `1970-01-01`, `0001-01-01t00:00:00z`, `0001-01-01`. Shared by `check_temporal_validity` and `check_production_date_sanity`.
 
 ### URL Health Quality Issues
 `check_url_health` collects static quality issues (no GET DATA URL, http:// URLs, missing descriptions) before the live HTTP probe. Issues are surfaced in `details["quality_issues"]` on all return paths. A clean probe that has quality issues returns WARN, not PASS. S3 (`s3://`) URLs skip the HTTP probe — presence alone is sufficient; quality issues still produce WARN. On SSLError, the probe retries without SSL verification to distinguish a reachable file from a real cert failure; a successful retry adds `ssl_note` to details but still returns PASS (NASA CDN self-signed cert quirk). HTTP 401/403 → WARN (access restricted); HTTP 404 → FAIL; other unexpected codes → WARN.
@@ -127,7 +129,7 @@ One CMR hit-count query (`query.hits()`), then one direct `GET /search/granules.
 1. Add `check_my_thing(granule) -> CheckResult` in `validator/checks.py`
 2. Add `"my_thing": ("My Thing Label", check_my_thing)` to `CHECKS` in `validator/runner.py`
 3. Add `"my_thing"` to `ALL_CHECK_IDS` in `validator/runner.py` (order controls display in config screen)
-4. Add a label string to `check_labels` dict in `gui/config_screen.py`
+4. Add a label string to `_CHECK_LABELS` dict in `gui/config_screen.py`
 
 ## Adding a New Home Screen Tool Card
 1. Append `(title, description, "show_method_name")` to `_TOOLS` in `gui/home_screen.py`
@@ -145,3 +147,15 @@ Key packages (`requirements.txt`):
 - `astral` — sun position for day/night check
 - `python-dotenv` — loads `.env` credentials
 - `Pillow` — browse image thumbnails in detail pane
+
+# Project Rules & Style Guide
+
+## Python Coding Standards
+- **Imports**: All imports must reside at the absolute top of the file. Group logically: 1. Standard Library, 2. Third-Party Libraries, 3. Local Application Modules. Never write inline or mid-file imports.
+- **Style Compliance**: Strictly adhere to PEP 8. Maintain 4-space indentation, wrap lines at 79 characters, and use 2 blank lines between top-level functions/classes.
+- **Execution Guard**: Keep operational script logic inside the `if __name__ == "__main__":` block.
+
+## Documentation & Comments
+- **Timelessness**: Write comments as if a stranger is reading the code a year from now. Do not reference our conversation history, previous bugs, edits, or debugging context.
+- **Docstrings**: Use clear, descriptive triple-quote `"""docstrings"""` for modules, classes, and public functions to explain purpose.
+- **Inline Comments**: Keep inline comments brief and focused entirely on *why* complex code is written, not *what* basic code is doing.

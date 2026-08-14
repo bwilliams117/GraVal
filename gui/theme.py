@@ -1,4 +1,8 @@
-# ── Accent (green) ────────────────────────────────────────────────────────────
+"""Centralised design tokens: colours, fonts, and ttk widget styles."""
+
+import tkinter.ttk as ttk
+
+# ── Accent ────────────────────────────────────────────────────────────────────
 ACCENT          = "#78D68B"
 ACCENT_HOVER    = "#5fc476"
 
@@ -47,9 +51,42 @@ FONT_MONO       = ("Courier", 11)
 FONT_MONO_SMALL = ("Courier", 10)
 
 
-def setup_ttk_style() -> None:
-    import tkinter.ttk as ttk
+def place_env_badge(screen, env: str) -> None:
+    """Place a floating pill-shaped environment badge in the top-right corner."""
+    import tkinter as tk
 
+    color = STATUS_WARN if env == "UAT" else ACCENT
+
+    try:
+        import customtkinter as ctk
+        badge = ctk.CTkLabel(
+            screen,
+            text=f"●  {env}",
+            font=FONT_SMALL,
+            text_color=color,
+            fg_color=SURFACE_2,
+            corner_radius=20,
+            width=76,
+            height=28,
+        )
+    except ImportError:
+        badge = tk.Label(
+            screen,
+            text=f"●  {env}",
+            bg=SURFACE_2,
+            fg=color,
+            font=("Helvetica", 10, "bold"),
+            relief="flat",
+            padx=10,
+            pady=4,
+        )
+
+    badge.place(relx=1.0, rely=0.0, anchor="ne", x=-16, y=12)
+    badge.lift()
+
+
+def setup_ttk_style() -> None:
+    """Apply the dark-theme styles to ttk.Treeview and Vertical.TScrollbar."""
     style = ttk.Style()
     try:
         style.theme_use("clam")

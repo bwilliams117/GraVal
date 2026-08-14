@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install system dependencies
-        run: brew install proj geos gdal hdf4
+        run: brew install proj geos gdal hdf
 
       - name: Install dependencies
         run: |

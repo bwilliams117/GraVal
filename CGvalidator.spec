@@ -20,7 +20,6 @@ a = Analysis(
         'PIL.ImageTk',
         'earthaccess',
         'astral',
-        'dotenv',
         'requests',
     ],
     hookspath=[],
@@ -38,9 +37,6 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
     name='GraVal',
     debug=False,
@@ -60,8 +56,19 @@ exe = EXE(
     ],
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='GraVal',
+)
+
+app = BUNDLE(
+    coll,
     name='GraVal.app',
     icon='gui/assets/graval_icon_macos.icns',
     bundle_identifier='gov.nasa.graval',

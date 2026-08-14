@@ -402,50 +402,81 @@ def check_url_health(granule, session=None) -> CheckResult:
         return CheckResult(name, status, msg, s3_details)
 
     if session is None:
-        session = earthaccess.get_requests_https_session()
+        try:
+            session = earthaccess.get_requests_https_session()
+        except Exception:
+            # earthaccess auth not initialised (e.g. UAT env); fall back to a
+            # plain session — auth-protected URLs will return 401/403 which the
+            # code below handles gracefully.
+            session = requests.Session()
 
-    def _probe(verify_ssl: bool) -> int:
-        resp = session.head(url, timeout=8, allow_redirects=True, verify=verify_ssl)
+    def _probe(target_url: str, verify_ssl: bool) -> int:
+        resp = session.head(
+            target_url, timeout=8, allow_redirects=True, verify=verify_ssl
+        )
         if resp.status_code == 405:
-            resp = session.get(url, timeout=8, stream=True, verify=verify_ssl)
+            resp = session.get(
+                target_url, timeout=8, stream=True, verify=verify_ssl
+            )
             resp.close()
         return resp.status_code
 
-    ssl_warning = None
-    try:
-        code = _probe(verify_ssl=True)
-    except requests.exceptions.SSLError:
-        # NASA Earthdata Cloud CDN sometimes presents a self-signed intermediate cert.
-        # Retry without verification to distinguish a reachable file from a real cert failure.
+    def _probe_with_ssl_fallback(target_url: str) -> tuple[int, str | None]:
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                code = _probe(verify_ssl=False)
-            ssl_warning = "SSL certificate could not be verified (self-signed CDN cert)"
+            return _probe(target_url, verify_ssl=True), None
+        except requests.exceptions.SSLError:
+            # NASA Earthdata Cloud CDN sometimes presents a self-signed cert.
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    code = _probe(target_url, verify_ssl=False)
+                return code, "SSL certificate could not be verified (self-signed CDN cert)"
+            except Exception:
+                raise
+        # Other network exceptions propagate to the caller.
+
+    # Try each HTTPS GET DATA link; stop at the first conclusive result (2xx or
+    # 404).  On 4xx/5xx or a connection error, fall through to the next URL.
+    # Preserve any HTTP response code already obtained — don't clobber it with
+    # None if a later URL throws a connection error.
+    last_code: int | None = None
+    last_ssl_warning: str | None = None
+    probed_url: str | None = None
+    probe_error: str | None = None
+
+    https_links = [u for u in links if not u.startswith("s3://")]
+    for candidate in https_links:
+        try:
+            last_code, last_ssl_warning = _probe_with_ssl_fallback(candidate)
+            probed_url = candidate
+            if 200 <= last_code < 300 or last_code == 404:
+                break
+            # 4xx/5xx — try the next URL if one exists.
         except Exception as exc:
-            exc_summary = str(exc).splitlines()[0][:120]
-            probe_fail: dict = {"probed_url": url, "urls": links}
-            if quality_issues:
-                probe_fail["quality_issues"] = quality_issues
-            return CheckResult(
-                name, Status.WARN,
-                f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
-                probe_fail,
-            )
-    except Exception as exc:
-        exc_summary = str(exc).splitlines()[0][:120]
-        probe_fail = {"probed_url": url, "urls": links}
+            probe_error = str(exc).splitlines()[0][:120]
+            if probed_url is None:
+                probed_url = candidate
+            # last_code intentionally not reset: keep any HTTP code from an
+            # earlier URL so we can still report a meaningful status.
+
+    if last_code is None:
+        probe_fail: dict = {
+            "probed_url": probed_url or url,
+            "urls": links,
+            "error": probe_error or "unknown",
+        }
         if quality_issues:
             probe_fail["quality_issues"] = quality_issues
         return CheckResult(
             name, Status.WARN,
-            f"{len(links)} URL(s) found but health probe failed: {exc_summary}",
+            f"{len(links)} URL(s) found but health probe failed: {probe_error or 'unknown'}",
             probe_fail,
         )
 
-    details = {"probed_url": url, "http_status": code, "urls": links}
-    if ssl_warning:
-        details["ssl_note"] = ssl_warning
+    code = last_code
+    details = {"probed_url": probed_url, "http_status": code, "urls": links}
+    if last_ssl_warning:
+        details["ssl_note"] = last_ssl_warning
     if quality_issues:
         details["quality_issues"] = quality_issues
 
@@ -453,13 +484,13 @@ def check_url_health(granule, session=None) -> CheckResult:
         if quality_issues:
             return CheckResult(
                 name, Status.WARN,
-                f"{len(links)} URL(s) found; first URL reachable (HTTP {code});"
+                f"{len(links)} URL(s) found; probed URL reachable (HTTP {code});"
                 f" {len(quality_issues)} quality issue(s)",
                 details,
             )
         return CheckResult(
             name, Status.PASS,
-            f"{len(links)} URL(s) found; first URL reachable (HTTP {code})",
+            f"{len(links)} URL(s) found; probed URL reachable (HTTP {code})",
             details,
         )
     if code in (401, 403):

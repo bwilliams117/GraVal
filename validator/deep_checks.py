@@ -588,12 +588,24 @@ def check_cog_nodata(path: Path, nan_ok: bool = True) -> CheckResult:
                     fill_found = []
 
                 if fill_found:
+                    # 0 is ambiguous — valid in flag/classification bands — so
+                    # only FAIL when a non-zero sentinel is detected.
+                    non_zero_fills = [v for v in fill_found if v != 0]
+                    if non_zero_fills:
+                        return CheckResult(
+                            name, Status.FAIL,
+                            f"NoData tag missing; fill value(s) {non_zero_fills} present in data",
+                            {
+                                "fill_values_in_data": non_zero_fills,
+                                "fix": f"gdal_translate -a_nodata {non_zero_fills[0]} ...",
+                            },
+                        )
                     return CheckResult(
-                        name, Status.FAIL,
-                        f"NoData tag missing; fill value(s) {fill_found} present in data",
+                        name, Status.WARN,
+                        "NoData tag missing; value 0 found in data (may be valid for flag/classification bands)",
                         {
                             "fill_values_in_data": fill_found,
-                            "fix": f"gdal_translate -a_nodata {fill_found[0]} ...",
+                            "note": "Declare NoData explicitly if 0 is a fill sentinel, not a data value",
                         },
                     )
                 return CheckResult(
@@ -737,20 +749,24 @@ def check_collection_cross_reference(
     concept_id: str,
     env: str,
     uat_token: str | None = None,
-) -> list[CheckResult]:
+) -> CheckResult:
     """Fetch collection UMM-C and compare platforms, instruments, and format.
 
     *std_meta* is the normalised metadata dict produced by
     ``deep_runner._parse_sidecar()``.  *concept_id* is the collection
     (not granule) concept-id.
+
+    Returns a single aggregated CheckResult.  Sub-check detail lines are
+    stored in ``details["sub_checks"]`` as ``"[STATUS] Label: message"``
+    strings.
     """
     name = "Collection Cross-Reference"
 
     if not concept_id:
-        return [CheckResult(
+        return CheckResult(
             name, Status.WARN,
             "Collection concept-id not provided — cross-reference skipped",
-        )]
+        )
 
     host = _CMR_HOST.get(env, _CMR_HOST["OPS"])
     headers = {}
@@ -767,20 +783,20 @@ def check_collection_cross_reference(
         resp.raise_for_status()
         items = resp.json().get("items", [])
     except Exception as exc:
-        return [CheckResult(
+        return CheckResult(
             name, Status.WARN,
             f"Could not fetch collection record: {exc}",
             {"concept_id": concept_id},
-        )]
+        )
 
     if not items:
-        return [CheckResult(
+        return CheckResult(
             name, Status.WARN,
             f"Collection {concept_id} not found in {env} CMR",
-        )]
+        )
 
     coll_umm = items[0].get("umm", {})
-    results: list[CheckResult] = []
+    sub_results: list[CheckResult] = []
 
     # ── DataFormat cross-check ────────────────────────────────────────────────
     gran_fmt = (std_meta.get("DataFormatType") or "").strip()
@@ -797,12 +813,12 @@ def check_collection_cross_reference(
             for f in coll_fmts
         )
         if fmt_match:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: DataFormat", Status.PASS,
                 f"Granule format '{gran_fmt}' matches collection: {coll_fmts}",
             ))
         else:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: DataFormat", Status.WARN,
                 f"Granule DataFormat '{gran_fmt}' not in collection formats {coll_fmts}",
                 {
@@ -826,7 +842,7 @@ def check_collection_cross_reference(
             if not any(gp.upper() == cp.upper() for cp in coll_plats)
         ]
         if unmatched:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: Platforms", Status.WARN,
                 f"Granule platform(s) not in collection: {unmatched}",
                 {
@@ -835,7 +851,7 @@ def check_collection_cross_reference(
                 },
             ))
         else:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: Platforms", Status.PASS,
                 f"Platforms match: {gran_plats}",
             ))
@@ -855,7 +871,7 @@ def check_collection_cross_reference(
             if not any(gi.upper() == ci.upper() for ci in coll_insts)
         ]
         if unmatched_i:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: Instruments", Status.WARN,
                 f"Granule instrument(s) not in collection: {unmatched_i}",
                 {
@@ -864,17 +880,34 @@ def check_collection_cross_reference(
                 },
             ))
         else:
-            results.append(CheckResult(
+            sub_results.append(CheckResult(
                 "Cross-Reference: Instruments", Status.PASS,
                 f"Instruments match: {gran_insts}",
             ))
 
-    if not results:
-        results.append(CheckResult(
+    if not sub_results:
+        return CheckResult(
             name, Status.WARN,
             "Cross-reference skipped — insufficient platform/instrument/format data "
             "in sidecar or collection record",
             {"collection_concept_id": concept_id},
-        ))
+        )
 
-    return results
+    statuses = [r.status for r in sub_results]
+    if Status.FAIL in statuses:
+        overall = Status.FAIL
+        n_bad = statuses.count(Status.FAIL)
+        summary = f"{n_bad}/{len(sub_results)} check(s) failed"
+    elif Status.WARN in statuses:
+        overall = Status.WARN
+        n_bad = statuses.count(Status.WARN)
+        summary = f"{n_bad}/{len(sub_results)} check(s) warned"
+    else:
+        overall = Status.PASS
+        summary = " · ".join(r.message for r in sub_results)
+
+    sub_lines = [
+        f"[{r.status.value}] {r.check_name.replace('Cross-Reference: ', '')}: {r.message}"
+        for r in sub_results
+    ]
+    return CheckResult(name, overall, summary, {"sub_checks": sub_lines})

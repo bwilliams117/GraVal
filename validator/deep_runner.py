@@ -250,6 +250,9 @@ def _parse_sidecar(sidecar_path: Path) -> dict:
         std["DayNightFlag"] = dg.get("DayNightFlag", "")
         std["ProductionDateTime"] = dg.get("ProductionDateTime", "")
         for entry in dg.get("ArchiveAndDistributionInformation", []):
+            fmt = entry.get("Format", "").strip()
+            if fmt and not std["DataFormatType"]:
+                std["DataFormatType"] = fmt
             size_bytes = entry.get("SizeInBytes")
             mb = entry.get("Size")
             unit = entry.get("SizeUnit", "MB").upper()
@@ -354,7 +357,64 @@ def _parse_sidecar(sidecar_path: Path) -> dict:
         if url:
             std["RelatedUrls"].append({"URL": url, "Type": url_type, "Description": desc})
 
+    for plat_elem in root.findall(f".//{pfx}Platform"):
+        pname = _tx(plat_elem, f"{pfx}ShortName")
+        if pname:
+            std["Platforms"].append(pname)
+            for inst_elem in plat_elem.findall(f".//{pfx}Instrument"):
+                iname = _tx(inst_elem, f"{pfx}ShortName")
+                if iname and iname not in std["Instruments"]:
+                    std["Instruments"].append(iname)
+
+    for aa_elem in root.findall(f".//{pfx}AdditionalAttribute"):
+        aa_name = _tx(aa_elem, f"{pfx}Name")
+        if aa_name in ("DataFormat", "DataFormatType") and not std["DataFormatType"]:
+            val_elem = aa_elem.find(f".//{pfx}Value")
+            if val_elem is not None and val_elem.text:
+                std["DataFormatType"] = val_elem.text.strip()
+
     return std
+
+
+def _aggregate_cog_check(check_fn, tif_files: list[Path], **kwargs) -> CheckResult:
+    """Run *check_fn* on every file and return one aggregated CheckResult.
+
+    For single-file products the original result is returned unchanged.
+    For multi-file products (e.g. ECOSTRESS per-band TIFs) the results are
+    collapsed into one row: PASS if all pass, otherwise FAIL/WARN with a
+    collapsible per-file breakdown in the details dict.
+    """
+    results = [(p, check_fn(p, **kwargs)) for p in tif_files]
+    statuses = [r.status for _, r in results]
+    check_name = results[0][1].check_name
+    n = len(results)
+
+    if all(s == Status.PASS for s in statuses):
+        if n == 1:
+            return results[0][1]
+        return CheckResult(
+            check_name, Status.PASS,
+            f"{results[0][1].message} ({n} files)",
+            {"files": [f"{p.name}: {r.message}" for p, r in results]},
+        )
+
+    overall = Status.FAIL if Status.FAIL in statuses else Status.WARN
+    fail_count = statuses.count(Status.FAIL)
+    warn_count = statuses.count(Status.WARN)
+    summary = (
+        f"{fail_count}/{n} file(s) failed"
+        if fail_count
+        else f"{warn_count}/{n} file(s) warned"
+    )
+    return CheckResult(
+        check_name, overall, summary,
+        {
+            "file_results": [
+                f"[{r.status.value}] {p.name}: {r.message}"
+                for p, r in results
+            ]
+        },
+    )
 
 
 # ── runner ────────────────────────────────────────────────────────────────────
@@ -871,30 +931,43 @@ class DeepValidationRunner:
             ))
             return
 
+        # Pre-group files by format so TIFF results can be aggregated across all
+        # band files in a single granule (e.g. ECOSTRESS has ~15 TIF files).
+        tiff_files: list[Path] = []
+        other_fmt_files: dict[str, list[Path]] = {}
         for sci_path in science_files:
             fmt = file_format if file_format != "AUTO" else _detect_format(sci_path)
+            if fmt == "TIFF":
+                tiff_files.append(sci_path)
+            else:
+                other_fmt_files.setdefault(fmt, []).append(sci_path)
 
-            if fmt == "HDF5" and "hdf5_sm" in enabled:
-                for res in check_hdf5_standard_metadata(
-                    sci_path,
-                    sm_path=cfg.get("hdf5_sm_path") or None,
-                    required=cfg.get("hdf5_sm_required") or [],
-                    expected=cfg.get("hdf5_sm_expected") or {},
-                    dataset_specs=cfg.get("hdf5_dataset_specs") or {},
-                ):
-                    report.checks.append(res)
+        # COG compliance: 4 aggregated results regardless of how many TIFF files.
+        if tiff_files and "cog_compliance" in enabled:
+            nan_ok = cfg.get("allow_nan_nodata", False)
+            report.checks.append(_aggregate_cog_check(check_cog_tiling, tiff_files))
+            report.checks.append(_aggregate_cog_check(check_cog_overviews, tiff_files))
+            report.checks.append(_aggregate_cog_check(check_cog_crs, tiff_files))
+            report.checks.append(
+                _aggregate_cog_check(check_cog_nodata, tiff_files, nan_ok=nan_ok)
+            )
 
-            elif fmt in ("NC3", "NC4") and "netcdf_struct" in enabled:
-                report.checks.append(check_netcdf_structure(sci_path))
-
-            elif fmt == "HDF4" and "hdf4_core" in enabled:
-                report.checks.append(check_hdf4_core_metadata(sci_path))
-
-            elif fmt == "TIFF" and "cog_compliance" in enabled:
-                report.checks.append(check_cog_tiling(sci_path))
-                report.checks.append(check_cog_overviews(sci_path))
-                report.checks.append(check_cog_crs(sci_path))
-                report.checks.append(check_cog_nodata(sci_path))
+        # Non-TIFF formats: per-file behaviour unchanged.
+        for fmt, files in other_fmt_files.items():
+            for sci_path in files:
+                if fmt == "HDF5" and "hdf5_sm" in enabled:
+                    for res in check_hdf5_standard_metadata(
+                        sci_path,
+                        sm_path=cfg.get("hdf5_sm_path") or None,
+                        required=cfg.get("hdf5_sm_required") or [],
+                        expected=cfg.get("hdf5_sm_expected") or {},
+                        dataset_specs=cfg.get("hdf5_dataset_specs") or {},
+                    ):
+                        report.checks.append(res)
+                elif fmt in ("NC3", "NC4") and "netcdf_struct" in enabled:
+                    report.checks.append(check_netcdf_structure(sci_path))
+                elif fmt == "HDF4" and "hdf4_core" in enabled:
+                    report.checks.append(check_hdf4_core_metadata(sci_path))
 
         # Format-agnostic checks.
         if "file_size" in enabled:
@@ -904,7 +977,7 @@ class DeepValidationRunner:
                 size_mb = std.get("SizeMBDataGranule")
             report.checks.append(
                 check_file_size_accuracy(
-                    science_files, size_mb,
+                    report.local_files or science_files, size_mb,
                     cfg.get("size_tolerance_pct", 20),
                 )
             )
@@ -917,8 +990,9 @@ class DeepValidationRunner:
 
         if "coll_xref" in enabled:
             std = _parse_sidecar(sidecar_path) if sidecar_path else {}
-            for res in check_collection_cross_reference(
-                std, cfg["concept_id"], cfg["env"],
-                uat_token=cfg.get("uat_token"),
-            ):
-                report.checks.append(res)
+            report.checks.append(
+                check_collection_cross_reference(
+                    std, cfg["concept_id"], cfg["env"],
+                    uat_token=cfg.get("uat_token"),
+                )
+            )

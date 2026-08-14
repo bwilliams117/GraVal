@@ -268,6 +268,8 @@ class InspectorConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 text_color=theme.TEXT_MUTED,
             ).pack(anchor="w", padx=10, pady=(8, 4))
 
+        self._nan_ok_var = tk.BooleanVar(value=False)
+
         for check_id, label, available, hint in _FILE_CHECKS:
             # PROD Readiness only applies when inspecting UAT granules — the
             # check scans for UAT endpoint strings that must be absent in OPS.
@@ -294,6 +296,26 @@ class InspectorConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
                 tk.Checkbutton(
                     file_group, text=display, variable=var, state=state
                 ).pack(anchor="w", padx=8, pady=2)
+
+            if check_id == "cog_compliance":
+                nan_state = "normal" if available else "disabled"
+                if _HAS_CTK:
+                    ctk.CTkCheckBox(
+                        file_group, text="  Allow NaN as NoData",
+                        variable=self._nan_ok_var,
+                        font=theme.FONT_CAPTION, state=nan_state,
+                    ).pack(anchor="w", padx=24, pady=(0, 2))
+                    ctk.CTkLabel(
+                        file_group,
+                        text="    ECOSTRESS products use NaN as fill value",
+                        font=theme.FONT_CAPTION,
+                        text_color=theme.TEXT_DISABLED,
+                    ).pack(anchor="w", padx=24, pady=(0, 4))
+                else:
+                    tk.Checkbutton(
+                        file_group, text="  Allow NaN as NoData",
+                        variable=self._nan_ok_var, state=nan_state,
+                    ).pack(anchor="w", padx=24, pady=1)
 
         self._divider()
 
@@ -388,5 +410,6 @@ class InspectorConfigScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
             "max_granules": int(self._max_granules_var.get()),
             "enabled_metadata_checks": enabled_metadata,
             "enabled_file_checks": enabled_file,
+            "allow_nan_nodata": self._nan_ok_var.get(),
         }
         self.app.show_inspector_results(check_config)

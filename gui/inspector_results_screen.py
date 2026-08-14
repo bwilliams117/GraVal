@@ -665,6 +665,17 @@ class InspectorResultsScreen(tk.Frame if not _HAS_CTK else ctk.CTkFrame):
         for status, color in _STATUS_COLORS.items():
             textbox.tag_configure(f"status_{status}", foreground=color)
 
+        n_pass = sum(1 for c in report.checks if c.status.value == "PASS")
+        n_warn = sum(1 for c in report.checks if c.status.value == "WARN")
+        n_fail = sum(1 for c in report.checks if c.status.value == "FAIL")
+        textbox.insert("end", "  ")
+        textbox.insert("end", f"✓  {n_pass}  PASS", "status_PASS")
+        textbox.insert("end", "   ")
+        textbox.insert("end", f"!  {n_warn}  WARN", "status_WARN")
+        textbox.insert("end", "   ")
+        textbox.insert("end", f"✗  {n_fail}  FAIL", "status_FAIL")
+        textbox.insert("end", "\n\n")
+
         _uid = [0]
 
         def _make_toggle(tb, tag_closed, tag_open, tag_items):

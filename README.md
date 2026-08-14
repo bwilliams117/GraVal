@@ -87,7 +87,7 @@ The app may take a few seconds to open on first launch while the bundled environ
 ## Requirements
 
 - Python 3.11+
-- **macOS (pyhdf):** `brew install hdf` before `pip install pyhdf`
+- **macOS (pyhdf):** HDF4 is no longer in Homebrew. Install via conda-forge: `conda install -c conda-forge pyhdf`, then skip it when running pip: `grep -iv "pyhdf" requirements.txt | pip install -r /dev/stdin`
 - **rasterio** may require system GDAL libraries on some platforms
 
 ---

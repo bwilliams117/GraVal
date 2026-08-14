@@ -6,22 +6,28 @@ on:
 jobs:
   build-macos:
     runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: "3.11"
+          channels: conda-forge,defaults
+          channel-priority: strict
+          activate-environment: graval
 
       - name: Install system dependencies
-        run: brew install proj geos gdal hdf
+        run: brew install proj geos gdal
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          conda install -c conda-forge pyhdf -y
           pip install pyinstaller
-          pip install -r requirements.txt
+          grep -iv "pyhdf" requirements.txt | pip install -r /dev/stdin
 
       - name: Build with PyInstaller
         run: pyinstaller CGvalidator.spec

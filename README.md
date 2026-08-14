@@ -87,7 +87,7 @@ The app may take a few seconds to open on first launch while the bundled environ
 ## Requirements
 
 - Python 3.11+
-- **macOS (pyhdf):** `brew install hdf4` before `pip install pyhdf`
+- **macOS (pyhdf):** `brew install hdf` before `pip install pyhdf`
 - **rasterio** may require system GDAL libraries on some platforms
 
 ---

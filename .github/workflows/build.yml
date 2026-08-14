@@ -34,11 +34,14 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller CGvalidator.spec
 
+      - name: Zip app bundle
+        run: cd dist && zip -r ../GraVal-macOS.zip GraVal.app
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: GraVal-macOS
-          path: dist/GraVal.app
+          path: GraVal-macOS.zip
           retention-days: 30
 
   build-windows:

@@ -14,6 +14,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install system dependencies
+        run: brew install proj geos gdal hdf4
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -53,5 +56,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GraVal-Windows
-          path: dist/GraVal.exe
+          path: dist/GraVal/
           retention-days: 30

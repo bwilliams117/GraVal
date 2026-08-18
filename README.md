@@ -74,9 +74,13 @@ The `gui/` layer is pure presentation — it reads results from queues and never
 
 Pre-built executables for Windows and macOS are available from the GitHub Releases page.
 
-**Windows (.exe):** Windows may show a SmartScreen warning the first time you run the app. Click **More info** → **Run anyway** to proceed.
+| Platform | File | Notes |
+|---|---|---|
+| macOS | `GraVal-macOS.zip` | Extract → right-click → Open |
+| Windows | `GraVal-Windows.zip` | Extract → run `GraVal.exe` |
 
-**macOS (.app):** macOS may block the app on first launch because it is not notarized. Right-click (or Control-click) the app, select **Open**, then confirm in the dialog that appears.
+> **macOS:** if blocked with "damaged" message, run `xattr -cr GraVal.app` in Terminal, then right-click → Open.  
+> **Windows:** SmartScreen may warn on first run — click **More info** → **Run anyway**.
 
 The app may take a few seconds to open on first launch while the bundled environment initializes.
 

@@ -138,6 +138,6 @@ Enter your [NASA Earthdata](https://urs.earthdata.nasa.gov) username and passwor
 
 ## Authors and Contributors
 
-| [<img src="https://github.com/bwilliams117.png" width="100"/>](https://github.com/bwilliams117) | [<img src="https://github.com" width="100"/>](https://github.com) | [<img src="https://github.com/GeoKetch.png" width="100"/>](https://github.com/GeoKetch) |
-| :---: | :---: | :---: |
-| **Bentley Williams** <br> <sub>Author and Developer</sub> | **David Nilsen** <br> <sub>Developer</sub> | **Alexander Ketchpaw** <br> <sub>Code Reviewer</sub> |
+| [<img src="https://github.com/bwilliams117.png" width="100"/>](https://github.com/bwilliams117) | [<img src="https://github.com/dnilsen13.png" width="100"/>](https://github.com/dnilsen13) | [<img src="https://github.com/GeoKetch.png" width="100"/>](https://github.com/GeoKetch) | [<img src="https://github.com/rquenzer-usgs.png" width="100"/>](https://github.com/rquenzer-usgs) |
+| :---: | :---: | :---: | :---: |
+| **Bentley Williams** <br> <sub>Author and Developer</sub> | **David Nilsen** <br> <sub>Developer</sub> | **Alexander Ketchpaw** <br> <sub>Code Reviewer</sub> | **Robert Quenzer** <br/> <sub>Project Manager and Code Reviewer</sub> |

@@ -133,7 +133,6 @@ Enter your [NASA Earthdata](https://urs.earthdata.nasa.gov) username and passwor
 
 ## Known Limitations
 
-- The Granule Validator is metadata-only — no science files are downloaded.
 - The day/night check returns WARN at extreme polar latitudes where sun-position calculation is unreliable.
 - Collections where `SpatialExtent` is legitimately absent produce WARN on spatial and day/night checks.
 - CMR rate limiting (~10 req/s) means larger sample sizes take proportionally longer to complete.

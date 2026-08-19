@@ -11,6 +11,10 @@ GraVal is a desktop GUI for validating NASA Earthdata granule collections. It pr
 
 ---
 
+https://github.com/user-attachments/assets/878f9099-e253-431b-80f1-7d4121a6ab85
+
+---
+
 ## Tools
 
 ### Granule Validator

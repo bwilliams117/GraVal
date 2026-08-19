@@ -138,13 +138,6 @@ Enter your [NASA Earthdata](https://urs.earthdata.nasa.gov) username and passwor
 
 ## Authors and Contributors
 
-**Bentley Williams** - *Lead Developer*
-
-<a href="https://github.com/bwilliams117">
-  <img src="https://github.com/bwilliams117.png" width="100px"/>
-</a>
-<br/>
-
-**David Nilsen** - *Developer*
-<br>
-**Alexander Ketchpaw** - *Code Review*
+| [<img src="https://github.com/bwilliams117.png" width="100"/>](https://github.com/bwilliams117) | [<img src="https://github.com" width="100"/>](https://github.com) | [<img src="https://github.com/GeoKetch.png" width="100"/>](https://github.com/GeoKetch) |
+| :---: | :---: | :---: |
+| **Bentley Williams** <br> <sub>Author and Developer</sub> | **David Nilsen** <br> <sub>Developer</sub> | **Alexander Ketchpaw** <br> <sub>Code Reviewer</sub> |

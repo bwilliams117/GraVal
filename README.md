@@ -1,8 +1,17 @@
+<img width="1280" height="640" alt="gv_github_banner" src="https://github.com/user-attachments/assets/1040f3be-168a-4640-b2d9-046cb8ce9c18" />
+
 # GraVal — NASA Granule Validation Tool
 
 **Version 1.0.0**
 
 GraVal is a desktop GUI for validating NASA Earthdata granule collections. It provides two instruments — a fast metadata spot-checker and a deep file-level inspector — accessible from a card-based home dashboard. Built with Python and customtkinter, GraVal supports both the OPS and UAT Earthdata environments.
+<br><br>
+[![GitHub Release](https://img.shields.io/badge/Click%20Here%20For-Latest%20Release-78D68B?style=for-the-badge)](https://github.com/bwilliams117/GraVal/releases)
+
+
+---
+
+https://github.com/user-attachments/assets/878f9099-e253-431b-80f1-7d4121a6ab85
 
 ---
 
@@ -75,6 +84,10 @@ The `gui/` layer is pure presentation — it reads results from queues and never
 ## Pre-built Releases
 
 Pre-built executables for Windows and macOS are available from the GitHub Releases page.
+<br>
+
+[![GitHub Release](https://img.shields.io/badge/Latest%20Release-78D68B?style=for-the-badge)](https://github.com/bwilliams117/GraVal/releases)
+
 
 | Platform | File | Notes |
 |---|---|---|
@@ -120,7 +133,14 @@ Enter your [NASA Earthdata](https://urs.earthdata.nasa.gov) username and passwor
 
 ## Known Limitations
 
-- The Granule Validator is metadata-only — no science files are downloaded.
 - The day/night check returns WARN at extreme polar latitudes where sun-position calculation is unreliable.
 - Collections where `SpatialExtent` is legitimately absent produce WARN on spatial and day/night checks.
 - CMR rate limiting (~10 req/s) means larger sample sizes take proportionally longer to complete.
+
+---
+
+## Authors and Contributors
+
+| [<img src="https://github.com/bwilliams117.png" width="100"/>](https://github.com/bwilliams117) | [<img src="https://github.com/dnilsen13.png" width="100"/>](https://github.com/dnilsen13) | [<img src="https://github.com/GeoKetch.png" width="100"/>](https://github.com/GeoKetch) | [<img src="https://github.com/rquenzer-usgs.png" width="100"/>](https://github.com/rquenzer-usgs) |
+| :---: | :---: | :---: | :---: |
+| **Bentley Williams** <br> <sub>Author and Developer</sub> | **David Nilsen** <br> <sub>Developer</sub> | **Alexander Ketchpaw** <br> <sub>Code Reviewer</sub> | **Robert Quenzer** <br/> <sub>Project Manager and Code Reviewer</sub> |
